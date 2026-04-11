@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from indicators_api import router as indicators_router
+from backtest_api import router as backtest_router
 
 router = APIRouter()
 
@@ -819,3 +820,4 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(indicators_router)
+app.include_router(backtest_router)
