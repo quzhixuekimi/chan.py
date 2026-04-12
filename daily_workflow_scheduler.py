@@ -26,39 +26,40 @@ LevelType = Literal["1D", "4H", "2H", "1H"]
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = "/tmp/daily_workflow_scheduler.log"
 
-DEFAULT_SYMBOLS = [
-  "AAPL",
-  "AMD",
-  "AMZN",
-  "APP",
-  "ASML",
-  "AVGO",
-  "AZN",
-  "BLK",
-  "COIN",
-  "GOOGL",
-  "HOOD",
-  "IBM",
-  "INTC",
-  "META",
-  "MRVL",
-  "MSFT",
-  "MSTR",
-  "MU",
-  "NFLX",
-  "NVDA",
-  "OKLO",
-  "ORCL",
-  "PLTR",
-  "QCOM",
-  "QQQ",
-  "SOXL",
-  "SPY",
-  "TSLA",
-  "TSM",
-  "UNH",
-  "UVIX",
-]
+DEFAULT_SYMBOLS = ["AAPL", "TSLA", "NVDA"]
+# DEFAULT_SYMBOLS = [
+#  "AAPL",
+#  "AMD",
+#  "AMZN",
+#  "APP",
+#  "ASML",
+#  "AVGO",
+#  "AZN",
+#  "BLK",
+#  "COIN",
+#  "GOOGL",
+#  "HOOD",
+#  "IBM",
+#  "INTC",
+#  "META",
+#  "MRVL",
+#  "MSFT",
+#  "MSTR",
+#  "MU",
+#  "NFLX",
+#  "NVDA",
+#  "OKLO",
+#  "ORCL",
+#  "PLTR",
+#  "QCOM",
+#  "QQQ",
+#  "SOXL",
+#  "SPY",
+#  "TSLA",
+#  "TSM",
+#  "UNH",
+#  "UVIX",
+# ]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H"]
 
 
@@ -74,6 +75,15 @@ class WorkflowConfig:
   request_timeout: int = 300
   pause_seconds: float = 0.2
   continue_on_analyze_error: bool = True
+
+  notify_enabled: bool = True
+  notify_base_url: str = "http://127.0.0.1:8010"
+  notify_timeout: int = 120
+  notify_dry_run: bool = False
+  notify_only_has_signal: bool = True
+  notify_limit: int | None = None
+  notify_digest_file: str | None = None
+  continue_on_notify_error: bool = True
 
 
 logger = logging.getLogger("daily_workflow_scheduler")
@@ -201,6 +211,78 @@ def run_backtest_step(config: WorkflowConfig, note: str | None = None) -> dict:
   return data
 
 
+def run_notify_step(config: WorkflowConfig) -> dict:
+  if not config.notify_enabled:
+    logger.info("[NOTIFY] skipped: notify_enabled=False")
+    return {
+      "enabled": False,
+      "skipped": True,
+      "reason": "notify disabled",
+    }
+
+  notify_url = f"{config.notify_base_url.rstrip('/')}/api/notify/telegram/send-digest"
+  payload = {
+    "digest_file": config.notify_digest_file,
+    "only_has_signal": config.notify_only_has_signal,
+    "limit": config.notify_limit,
+    "dry_run": config.notify_dry_run,
+  }
+
+  logger.info(
+    "[NOTIFY] request url=%s dry_run=%s only_has_signal=%s limit=%s digest_file=%s",
+    notify_url,
+    config.notify_dry_run,
+    config.notify_only_has_signal,
+    config.notify_limit,
+    config.notify_digest_file,
+  )
+
+  try:
+    resp = _post_json(notify_url, payload, timeout=config.notify_timeout)
+  except Exception as e:
+    logger.exception("[NOTIFY] exception err=%s", e)
+    if not config.continue_on_notify_error:
+      raise
+    return {
+      "enabled": True,
+      "ok": False,
+      "status_code": None,
+      "error": str(e),
+    }
+
+  if not resp.ok:
+    logger.error(
+      "[NOTIFY] fail status=%s response=%s",
+      resp.status_code,
+      resp.text[:2000],
+    )
+    if not config.continue_on_notify_error:
+      raise RuntimeError(
+        f"notify failed: status={resp.status_code}, response={resp.text[:2000]}"
+      )
+    return {
+      "enabled": True,
+      "ok": False,
+      "status_code": resp.status_code,
+      "response": resp.text[:2000],
+    }
+
+  try:
+    data = resp.json()
+  except Exception:
+    data = {"raw": resp.text[:2000]}
+
+  logger.info("[NOTIFY] ok status=%s", resp.status_code)
+  logger.debug("[NOTIFY] response=%s", json.dumps(data, ensure_ascii=False)[:4000])
+
+  return {
+    "enabled": True,
+    "ok": True,
+    "status_code": resp.status_code,
+    "data": data,
+  }
+
+
 def run_daily_workflow(config: WorkflowConfig) -> dict:
   started_at = _now_str(config.timezone)
   logger.info("[WORKFLOW] start at=%s tz=%s", started_at, config.timezone)
@@ -214,11 +296,14 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
       "finished_at": _now_str(config.timezone),
       "analyze": analyze_result,
       "backtest": None,
+      "notify": None,
       "status": "failed",
       "reason": "no analyze success",
     }
 
   backtest_result = run_backtest_step(config)
+  notify_result = run_notify_step(config)
+
   finished_at = _now_str(config.timezone)
   logger.info("[WORKFLOW] finished at=%s", finished_at)
   return {
@@ -226,6 +311,7 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
     "finished_at": finished_at,
     "analyze": analyze_result,
     "backtest": backtest_result,
+    "notify": notify_result,
     "status": "ok",
   }
 
@@ -259,12 +345,20 @@ def build_config(args: argparse.Namespace) -> WorkflowConfig:
     request_timeout=args.timeout,
     pause_seconds=args.pause_seconds,
     continue_on_analyze_error=not args.stop_on_analyze_error,
+    notify_enabled=not args.disable_notify,
+    notify_base_url=args.notify_base_url,
+    notify_timeout=args.notify_timeout,
+    notify_dry_run=args.notify_dry_run,
+    notify_only_has_signal=not args.notify_send_all,
+    notify_limit=args.notify_limit,
+    notify_digest_file=args.notify_digest_file,
+    continue_on_notify_error=not args.stop_on_notify_error,
   )
 
 
 def main() -> None:
   parser = argparse.ArgumentParser(
-    description="Daily workflow scheduler: analyze -> backtest"
+    description="Daily workflow scheduler: analyze -> backtest -> notify"
   )
   parser.add_argument(
     "--base-url", default="http://localhost:8000", help="Chan API base URL"
@@ -292,6 +386,50 @@ def main() -> None:
     action="store_true",
     help="Stop immediately when any analyze call fails",
   )
+
+  parser.add_argument(
+    "--disable-notify",
+    action="store_true",
+    help="Disable telegram notify step",
+  )
+  parser.add_argument(
+    "--notify-base-url",
+    default="http://127.0.0.1:8010",
+    help="Telegram notify API base URL",
+  )
+  parser.add_argument(
+    "--notify-timeout",
+    type=int,
+    default=120,
+    help="Notify request timeout seconds",
+  )
+  parser.add_argument(
+    "--notify-dry-run",
+    action="store_true",
+    help="Notify dry run only, do not actually send telegram messages",
+  )
+  parser.add_argument(
+    "--notify-send-all",
+    action="store_true",
+    help="Send all digest rows, not only has_signal=True",
+  )
+  parser.add_argument(
+    "--notify-limit",
+    type=int,
+    default=None,
+    help="Limit notify message count for debugging",
+  )
+  parser.add_argument(
+    "--notify-digest-file",
+    default=None,
+    help="Optional digest csv file path for telegram notify api",
+  )
+  parser.add_argument(
+    "--stop-on-notify-error",
+    action="store_true",
+    help="Stop workflow immediately when notify step fails",
+  )
+
   parser.add_argument(
     "--run-once", action="store_true", help="Run workflow immediately once and exit"
   )
@@ -324,7 +462,7 @@ def main() -> None:
   )
 
   logger.info(
-    "[BOOT] scheduler started base_url=%s time=%02d:%02d timezone=%s symbols=%s levels=%s strategy_id=%s",
+    "[BOOT] scheduler started base_url=%s time=%02d:%02d timezone=%s symbols=%s levels=%s strategy_id=%s notify_enabled=%s notify_base_url=%s",
     config.base_url,
     config.cron_hour,
     config.cron_minute,
@@ -332,6 +470,8 @@ def main() -> None:
     len(config.symbols),
     config.levels,
     config.backtest_strategy_id,
+    config.notify_enabled,
+    config.notify_base_url,
   )
   scheduler.start()
 
