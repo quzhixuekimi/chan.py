@@ -27,39 +27,6 @@ BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = "/tmp/daily_workflow_scheduler.log"
 
 DEFAULT_SYMBOLS = ["AAPL", "TSLA", "NVDA"]
-# DEFAULT_SYMBOLS = [
-#  "AAPL",
-#  "AMD",
-#  "AMZN",
-#  "APP",
-#  "ASML",
-#  "AVGO",
-#  "AZN",
-#  "BLK",
-#  "COIN",
-#  "GOOGL",
-#  "HOOD",
-#  "IBM",
-#  "INTC",
-#  "META",
-#  "MRVL",
-#  "MSFT",
-#  "MSTR",
-#  "MU",
-#  "NFLX",
-#  "NVDA",
-#  "OKLO",
-#  "ORCL",
-#  "PLTR",
-#  "QCOM",
-#  "QQQ",
-#  "SOXL",
-#  "SPY",
-#  "TSLA",
-#  "TSM",
-#  "UNH",
-#  "UVIX",
-# ]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H"]
 
 
@@ -192,11 +159,10 @@ def run_analyze_step(config: WorkflowConfig) -> dict:
 def run_backtest_step(config: WorkflowConfig, note: str | None = None) -> dict:
   backtest_url = f"{config.base_url.rstrip('/')}/api/chan/backtest"
   payload = {
-    "run_mode": "single",
-    "strategy_id": config.backtest_strategy_id,
+    "run_mode": "all",
     "note": note or f"scheduled workflow {_now_str(config.timezone)}",
   }
-  logger.info("[BACKTEST] request strategy_id=%s", config.backtest_strategy_id)
+  logger.info("[BACKTEST] request run_mode=all")
   resp = _post_json(backtest_url, payload, timeout=max(config.request_timeout, 1800))
   if not resp.ok:
     logger.error(
@@ -206,12 +172,13 @@ def run_backtest_step(config: WorkflowConfig, note: str | None = None) -> dict:
       f"backtest failed: status={resp.status_code}, response={resp.text[:2000]}"
     )
   data = resp.json()
-  logger.info("[BACKTEST] ok strategy_id=%s", config.backtest_strategy_id)
+  requested = data.get("data", {}).get("requested_strategies", []) or []
+  logger.info("[BACKTEST] ok run_mode=all requested_strategies=%s", requested)
   logger.debug("[BACKTEST] response=%s", json.dumps(data, ensure_ascii=False)[:4000])
   return data
 
 
-def run_notify_step(config: WorkflowConfig) -> dict:
+def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
   if not config.notify_enabled:
     logger.info("[NOTIFY] skipped: notify_enabled=False")
     return {
@@ -220,66 +187,104 @@ def run_notify_step(config: WorkflowConfig) -> dict:
       "reason": "notify disabled",
     }
 
+  if not strategy_ids:
+    logger.info("[NOTIFY] skipped: no strategy_ids from backtest")
+    return {
+      "enabled": True,
+      "skipped": True,
+      "reason": "no strategy_ids",
+      "requested_strategies": [],
+      "results": [],
+    }
+
   notify_url = f"{config.notify_base_url.rstrip('/')}/api/notify/telegram/send-digest"
-  payload = {
-    "digest_file": config.notify_digest_file,
-    "only_has_signal": config.notify_only_has_signal,
-    "limit": config.notify_limit,
-    "dry_run": config.notify_dry_run,
-  }
+  results: list[dict] = []
 
-  logger.info(
-    "[NOTIFY] request url=%s dry_run=%s only_has_signal=%s limit=%s digest_file=%s",
-    notify_url,
-    config.notify_dry_run,
-    config.notify_only_has_signal,
-    config.notify_limit,
-    config.notify_digest_file,
-  )
-
-  try:
-    resp = _post_json(notify_url, payload, timeout=config.notify_timeout)
-  except Exception as e:
-    logger.exception("[NOTIFY] exception err=%s", e)
-    if not config.continue_on_notify_error:
-      raise
-    return {
-      "enabled": True,
-      "ok": False,
-      "status_code": None,
-      "error": str(e),
+  for strategy_id in strategy_ids:
+    payload = {
+      "strategy_id": strategy_id,
+      "digest_file": config.notify_digest_file,
+      "only_has_signal": config.notify_only_has_signal,
+      "limit": config.notify_limit,
+      "dry_run": config.notify_dry_run,
     }
 
-  if not resp.ok:
-    logger.error(
-      "[NOTIFY] fail status=%s response=%s",
-      resp.status_code,
-      resp.text[:2000],
+    logger.info(
+      "[NOTIFY] request url=%s strategy_id=%s dry_run=%s only_has_signal=%s limit=%s digest_file=%s",
+      notify_url,
+      strategy_id,
+      config.notify_dry_run,
+      config.notify_only_has_signal,
+      config.notify_limit,
+      config.notify_digest_file,
     )
-    if not config.continue_on_notify_error:
-      raise RuntimeError(
-        f"notify failed: status={resp.status_code}, response={resp.text[:2000]}"
+
+    try:
+      resp = _post_json(notify_url, payload, timeout=config.notify_timeout)
+    except Exception as e:
+      logger.exception("[NOTIFY] exception strategy_id=%s err=%s", strategy_id, e)
+      if not config.continue_on_notify_error:
+        raise
+      results.append(
+        {
+          "strategy_id": strategy_id,
+          "ok": False,
+          "status_code": None,
+          "error": str(e),
+        }
       )
-    return {
-      "enabled": True,
-      "ok": False,
-      "status_code": resp.status_code,
-      "response": resp.text[:2000],
-    }
+      continue
 
-  try:
-    data = resp.json()
-  except Exception:
-    data = {"raw": resp.text[:2000]}
+    if not resp.ok:
+      logger.error(
+        "[NOTIFY] fail strategy_id=%s status=%s response=%s",
+        strategy_id,
+        resp.status_code,
+        resp.text[:2000],
+      )
+      if not config.continue_on_notify_error:
+        raise RuntimeError(
+          f"notify failed: strategy_id={strategy_id}, status={resp.status_code}, response={resp.text[:2000]}"
+        )
+      results.append(
+        {
+          "strategy_id": strategy_id,
+          "ok": False,
+          "status_code": resp.status_code,
+          "response": resp.text[:2000],
+        }
+      )
+      continue
 
-  logger.info("[NOTIFY] ok status=%s", resp.status_code)
-  logger.debug("[NOTIFY] response=%s", json.dumps(data, ensure_ascii=False)[:4000])
+    try:
+      data = resp.json()
+    except Exception:
+      data = {"raw": resp.text[:2000]}
 
+    logger.info("[NOTIFY] ok strategy_id=%s status=%s", strategy_id, resp.status_code)
+    logger.debug(
+      "[NOTIFY] response strategy_id=%s body=%s",
+      strategy_id,
+      json.dumps(data, ensure_ascii=False)[:4000],
+    )
+
+    results.append(
+      {
+        "strategy_id": strategy_id,
+        "ok": True,
+        "status_code": resp.status_code,
+        "data": data,
+      }
+    )
+
+  success_count = sum(1 for x in results if x.get("ok"))
   return {
     "enabled": True,
-    "ok": True,
-    "status_code": resp.status_code,
-    "data": data,
+    "ok": success_count == len(results) if results else True,
+    "requested_strategies": strategy_ids,
+    "success_count": success_count,
+    "failed_count": len(results) - success_count,
+    "results": results,
   }
 
 
@@ -302,7 +307,10 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
     }
 
   backtest_result = run_backtest_step(config)
-  notify_result = run_notify_step(config)
+  requested_strategies = (
+    backtest_result.get("data", {}).get("requested_strategies", []) or []
+  )
+  notify_result = run_notify_step(config, requested_strategies)
 
   finished_at = _now_str(config.timezone)
   logger.info("[WORKFLOW] finished at=%s", finished_at)
