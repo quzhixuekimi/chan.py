@@ -48,6 +48,10 @@ class WorkflowConfig:
   notify_timeout: int = 120
   notify_dry_run: bool = False
   notify_only_has_signal: bool = True
+  notify_only_whitelist_event_types: bool = True
+  notify_include_empty_summary: bool = False
+  notify_deduplicate: bool = True
+  notify_resend_existing: bool = False
   notify_limit: int | None = None
   notify_digest_file: str | None = None
   continue_on_notify_error: bool = True
@@ -205,16 +209,24 @@ def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
       "strategy_id": strategy_id,
       "digest_file": config.notify_digest_file,
       "only_has_signal": config.notify_only_has_signal,
+      "only_whitelist_event_types": config.notify_only_whitelist_event_types,
+      "include_empty_summary": config.notify_include_empty_summary,
+      "deduplicate": config.notify_deduplicate,
+      "resend_existing": config.notify_resend_existing,
       "limit": config.notify_limit,
       "dry_run": config.notify_dry_run,
     }
 
     logger.info(
-      "[NOTIFY] request url=%s strategy_id=%s dry_run=%s only_has_signal=%s limit=%s digest_file=%s",
+      "[NOTIFY] request url=%s strategy_id=%s dry_run=%s only_has_signal=%s only_whitelist_event_types=%s include_empty_summary=%s deduplicate=%s resend_existing=%s limit=%s digest_file=%s",
       notify_url,
       strategy_id,
       config.notify_dry_run,
       config.notify_only_has_signal,
+      config.notify_only_whitelist_event_types,
+      config.notify_include_empty_summary,
+      config.notify_deduplicate,
+      config.notify_resend_existing,
       config.notify_limit,
       config.notify_digest_file,
     )
@@ -261,7 +273,12 @@ def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
     except Exception:
       data = {"raw": resp.text[:2000]}
 
-    logger.info("[NOTIFY] ok strategy_id=%s status=%s", strategy_id, resp.status_code)
+    logger.info(
+      "[NOTIFY] ok strategy_id=%s status=%s message_count=%s",
+      strategy_id,
+      resp.status_code,
+      data.get("message_count"),
+    )
     logger.debug(
       "[NOTIFY] response strategy_id=%s body=%s",
       strategy_id,
@@ -358,6 +375,10 @@ def build_config(args: argparse.Namespace) -> WorkflowConfig:
     notify_timeout=args.notify_timeout,
     notify_dry_run=args.notify_dry_run,
     notify_only_has_signal=not args.notify_send_all,
+    notify_only_whitelist_event_types=not args.notify_send_non_whitelist,
+    notify_include_empty_summary=args.notify_include_empty_summary,
+    notify_deduplicate=not args.notify_disable_deduplicate,
+    notify_resend_existing=args.notify_resend_existing,
     notify_limit=args.notify_limit,
     notify_digest_file=args.notify_digest_file,
     continue_on_notify_error=not args.stop_on_notify_error,
@@ -420,6 +441,26 @@ def main() -> None:
     "--notify-send-all",
     action="store_true",
     help="Send all digest rows, not only has_signal=True",
+  )
+  parser.add_argument(
+    "--notify-send-non-whitelist",
+    action="store_true",
+    help="Allow non-whitelist event rows",
+  )
+  parser.add_argument(
+    "--notify-include-empty-summary",
+    action="store_true",
+    help="Include empty summaries like 全周期无信号",
+  )
+  parser.add_argument(
+    "--notify-disable-deduplicate",
+    action="store_true",
+    help="Disable deduplication when calling telegram notify api",
+  )
+  parser.add_argument(
+    "--notify-resend-existing",
+    action="store_true",
+    help="Resend existing deduplicated messages",
   )
   parser.add_argument(
     "--notify-limit",
