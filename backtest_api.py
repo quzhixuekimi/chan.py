@@ -41,17 +41,16 @@ STRATEGY_REGISTRY: dict[str, StrategyRegistryItem] = {
     output_dir="user_strategy_v7_bi/results",
     market_summary_file="market_all_summary_v7_bi.csv",
   ),
-  # 未来继续扩展：
-  # "v8_macd": StrategyRegistryItem(
-  #     strategy_id="v8_macd",
-  #     module="user_strategy_v8_macd.run_v8_macd",
-  #     description="V8 MACD 策略",
-  #     enabled=False,
-  #     allow_run_all=True,
-  #     timeout_seconds=1800,
-  #     output_dir="user_strategy_v8_macd/results",
-  #     market_summary_file="market_all_summary_v8_macd.csv",
-  # ),
+  "v8_byma": StrategyRegistryItem(
+    strategy_id="v8_byma",
+    module="user_strategy_v8_byma.run_v8_byma",
+    description="V8 blue yellow with ma策略",
+    enabled=True,
+    allow_run_all=True,
+    timeout_seconds=1800,
+    output_dir="user_strategy_v8_byma/results",
+    market_summary_file="market_all_summary_v8_byma.csv",
+  ),
 }
 
 
