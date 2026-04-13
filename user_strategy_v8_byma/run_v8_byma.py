@@ -17,6 +17,14 @@ READABLE_EVENT_TYPES = {
   "LONG_STOP_LOSS",
   "BULL_ENV_READY",
 }
+
+TELEGRAM_DIGEST_EVENT_TYPES = {
+  "LONG_ENTRY_READY",
+  "LONG_WEAKEN_ALERT",
+  "LONG_EXIT_TREND",
+  "LONG_STOP_LOSS",
+}
+
 TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h"]
 
 SYMBOL_TIMEFRAME_WHITELIST: Dict[str, set[str]] = {}
@@ -346,13 +354,55 @@ def build_last_events_per_symbol_timeframe(readable_df: pd.DataFrame) -> pd.Data
   x["event_date_dt"] = pd.to_datetime(x["event_date"], errors="coerce")
   x["latest_event_time_dt"] = pd.to_datetime(x["latest_event_time"], errors="coerce")
   x["timeframe"] = x["timeframe"].map(_normalize_timeframe)
+
+  actionable_types = {
+    "LONG_ENTRY_READY",
+    "LONG_WEAKEN_ALERT",
+    "LONG_EXIT_TREND",
+    "LONG_STOP_LOSS",
+  }
+
   x = x.sort_values(
-    ["symbol", "timeframe", "latest_event_time_dt"], ascending=[True, True, True]
+    ["symbol", "timeframe", "event_date_dt", "latest_event_time_dt"],
+    ascending=[True, True, True, True],
+  ).reset_index(drop=True)
+
+  picked_rows = []
+
+  for (symbol, timeframe), grp in x.groupby(["symbol", "timeframe"], sort=True):
+    grp = grp.sort_values(
+      ["event_date_dt", "latest_event_time_dt"],
+      ascending=[True, True],
+    )
+
+    actionable = grp[grp["latest_event_type"].isin(actionable_types)].copy()
+
+    if not actionable.empty:
+      picked_rows.append(actionable.iloc[-1].to_dict())
+    else:
+      picked_rows.append(grp.iloc[-1].to_dict())
+
+  if not picked_rows:
+    return pd.DataFrame(columns=cols)
+
+  out = pd.DataFrame(picked_rows)
+  return out[cols].sort_values(["symbol", "timeframe"]).reset_index(drop=True)
+
+
+def build_symbol_reference_dates(readable_df: pd.DataFrame) -> pd.DataFrame:
+  cols = ["symbol", "reference_date", "reference_date_dt"]
+  if readable_df is None or readable_df.empty:
+    return pd.DataFrame(columns=cols)
+
+  x = readable_df.copy()
+  x["event_date_dt"] = pd.to_datetime(x["event_date"], errors="coerce")
+  ref = (
+    x.groupby("symbol", as_index=False)["event_date_dt"]
+    .max()
+    .rename(columns={"event_date_dt": "reference_date_dt"})
   )
-  latest = (
-    x.groupby(["symbol", "timeframe"], as_index=False, group_keys=False).tail(1).copy()
-  )
-  return latest[cols].sort_values(["symbol", "timeframe"])
+  ref["reference_date"] = ref["reference_date_dt"].dt.strftime("%Y/%m/%d").fillna("")
+  return ref[cols]
 
 
 def _event_type_rank(event_type: str) -> int:
@@ -367,7 +417,9 @@ def _event_type_rank(event_type: str) -> int:
 
 
 def build_last_digest_by_symbol(
-  last_df: pd.DataFrame, fresh_days: int = 2
+  last_df: pd.DataFrame,
+  reference_dates_df: pd.DataFrame | None = None,
+  fresh_days: int = 2,
 ) -> pd.DataFrame:
   cols = [
     "symbol",
@@ -410,13 +462,31 @@ def build_last_digest_by_symbol(
   x["event_date_dt"] = pd.to_datetime(x["event_date"], errors="coerce")
   x["latest_event_time_dt"] = pd.to_datetime(x["latest_event_time"], errors="coerce")
 
+  ref_map: Dict[str, pd.Timestamp] = {}
+  ref_str_map: Dict[str, str] = {}
+  if reference_dates_df is not None and not reference_dates_df.empty:
+    rdf = reference_dates_df.copy()
+    rdf["reference_date_dt"] = pd.to_datetime(rdf["reference_date_dt"], errors="coerce")
+    rdf["reference_date"] = rdf["reference_date"].fillna("")
+    for _, rr in rdf.iterrows():
+      sym = str(rr.get("symbol", "") or "")
+      if sym:
+        ref_map[sym] = rr.get("reference_date_dt")
+        ref_str_map[sym] = rr.get("reference_date", "")
+
   rows = []
   for symbol, g in x.groupby("symbol", sort=True):
     item = {"symbol": symbol}
-    reference_date_dt = g["event_date_dt"].max()
-    reference_date = (
-      reference_date_dt.strftime("%Y/%m/%d") if pd.notna(reference_date_dt) else ""
-    )
+
+    reference_date_dt = ref_map.get(symbol)
+    reference_date = ref_str_map.get(symbol, "")
+
+    if pd.isna(reference_date_dt) or not reference_date:
+      reference_date_dt = g["event_date_dt"].max()
+      reference_date = (
+        reference_date_dt.strftime("%Y/%m/%d") if pd.notna(reference_date_dt) else ""
+      )
+
     item["reference_date"] = reference_date
     item["signal_date"] = reference_date
     item["fresh_days"] = fresh_days
@@ -440,11 +510,13 @@ def build_last_digest_by_symbol(
           "bull_regime_id": "",
           "is_fresh": False,
           "age_days": None,
+          "telegram_allowed": False,
         }
         continue
 
       sub = sub.sort_values(["event_date_dt", "latest_event_time_dt"])
       r = sub.iloc[-1]
+      raw_event_type = str(r.get("latest_event_type", "") or "")
       event_date_dt = r.get("event_date_dt")
       age_days = None
       is_fresh = False
@@ -452,8 +524,10 @@ def build_last_digest_by_symbol(
         age_days = int((reference_date_dt - event_date_dt).days)
         is_fresh = age_days <= fresh_days
 
-      if is_fresh:
-        item[f"{tf}_event_type"] = r.get("latest_event_type", "")
+      telegram_allowed = raw_event_type in TELEGRAM_DIGEST_EVENT_TYPES
+
+      if is_fresh and telegram_allowed:
+        item[f"{tf}_event_type"] = raw_event_type
         item[f"{tf}_signal_text"] = r.get("signal_text", "")
         item[f"{tf}_event_time"] = r.get("latest_event_time", "")
         item[f"{tf}_latest_price"] = _format_price(r.get("latest_price"))
@@ -472,7 +546,7 @@ def build_last_digest_by_symbol(
         item[f"{tf}_bull_regime_id"] = ""
 
       tf_payload[tf] = {
-        "event_type": r.get("latest_event_type", ""),
+        "event_type": raw_event_type,
         "signal_text": r.get("signal_text", ""),
         "event_time": r.get("latest_event_time", ""),
         "latest_price": _format_price(r.get("latest_price")),
@@ -484,6 +558,7 @@ def build_last_digest_by_symbol(
         ),
         "is_fresh": is_fresh,
         "age_days": age_days,
+        "telegram_allowed": telegram_allowed,
       }
 
     item["has_signal"] = any(
@@ -774,8 +849,11 @@ def main():
 
       symbol_readable_df = build_readable_signal_events(all_symbol_signal_events_df)
       symbol_last_df = build_last_events_per_symbol_timeframe(symbol_readable_df)
+      symbol_ref_df = build_symbol_reference_dates(symbol_readable_df)
       symbol_last_digest_df = build_last_digest_by_symbol(
-        symbol_last_df, fresh_days=conf.fresh_days
+        symbol_last_df,
+        reference_dates_df=symbol_ref_df,
+        fresh_days=conf.fresh_days,
       )
 
       save_df(
@@ -814,8 +892,11 @@ def main():
 
     market_readable_df = build_readable_signal_events(market_all_signal_events_df)
     market_last_df = build_last_events_per_symbol_timeframe(market_readable_df)
+    market_ref_df = build_symbol_reference_dates(market_readable_df)
     market_last_digest_df = build_last_digest_by_symbol(
-      market_last_df, fresh_days=conf.fresh_days
+      market_last_df,
+      reference_dates_df=market_ref_df,
+      fresh_days=conf.fresh_days,
     )
 
     save_df(market_readable_df, out_dir / "market_signal_events_readable_v8_byma.csv")
