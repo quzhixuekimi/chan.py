@@ -51,6 +51,16 @@ STRATEGY_REGISTRY: dict[str, StrategyRegistryItem] = {
     output_dir="user_strategy_v8_byma/results",
     market_summary_file="market_all_summary_v8_byma.csv",
   ),
+  "v9_mr": StrategyRegistryItem(
+    strategy_id="v9_mr",
+    module="user_strategy_v9_mr.run_v9_mr",
+    description="V9 MACD and RSI 策略",
+    enabled=True,
+    allow_run_all=True,
+    timeout_seconds=1800,
+    output_dir="user_strategy_v9_mr/results",
+    market_summary_file="market_all_summary_v9_mr.csv",
+  ),
 }
 
 
