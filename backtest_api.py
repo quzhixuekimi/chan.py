@@ -31,6 +31,16 @@ class StrategyRegistryItem(BaseModel):
 
 
 STRATEGY_REGISTRY: dict[str, StrategyRegistryItem] = {
+  "v6_bspzs": StrategyRegistryItem(
+    strategy_id="v6_bspzs",
+    module="user_strategy_v6_bspzs.run_v6_bspzs",
+    description="V6 buy sell zs 结构回测策略",
+    enabled=True,
+    allow_run_all=True,
+    timeout_seconds=1800,
+    output_dir="user_strategy_v6_bspzs/results",
+    market_summary_file="market_all_summary_v6_bspzs.csv",
+  ),
   "v7_bi": StrategyRegistryItem(
     strategy_id="v7_bi",
     module="user_strategy_v7_bi.run_v7_bi",
