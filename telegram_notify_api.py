@@ -19,7 +19,8 @@ BASE_DIR = Path(__file__).resolve().parent
 STRATEGY_DIGEST_REGISTRY = {
   "v6_bspzs": {
     "results_dir": BASE_DIR / "user_strategy_v6_bspzs" / "results",
-    "digest_file": "market_signal_digest_last_per_symbol_v6_bspzs.csv",
+    # "digest_file": "market_signal_digest_last_per_symbol_v6_bspzs.csv",
+    "digest_file": "market_trading_signal_digest_last_per_symbol_v6_bspzs.csv",
   },
   "v7_bi": {
     "results_dir": BASE_DIR / "user_strategy_v7_bi" / "results",
