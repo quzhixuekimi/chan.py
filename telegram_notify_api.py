@@ -17,6 +17,10 @@ from pydantic import BaseModel, Field
 BASE_DIR = Path(__file__).resolve().parent
 
 STRATEGY_DIGEST_REGISTRY = {
+  "v6_bspzs": {
+    "results_dir": BASE_DIR / "user_strategy_v6_bspzs" / "results",
+    "digest_file": "market_signal_digest_last_per_symbol_v6_bspzs.csv",
+  },
   "v7_bi": {
     "results_dir": BASE_DIR / "user_strategy_v7_bi" / "results",
     "digest_file": "market_signal_digest_last_per_symbol_v7_bi.csv",
@@ -107,14 +111,16 @@ class TelegramDigestRequest(BaseModel):
 
 def get_telegram_token() -> str:
   token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-  if token:
-    return token
+  if not token:
+    raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN is empty")
+  return token
 
 
 def get_default_chat_id() -> str:
   chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-  if chat_id:
-    return chat_id
+  if not chat_id:
+    raise HTTPException(status_code=500, detail="TELEGRAM_CHAT_ID is empty")
+  return chat_id
 
 
 def telegram_api_url(method: str) -> str:
@@ -512,4 +518,4 @@ def send_digest(req: TelegramDigestRequest):
 if __name__ == "__main__":
   import uvicorn
 
-  uvicorn.run("telegram_notify_api:app", host="0.0.0.0", port=8010, reload=True)
+  uvicorn.run("telegram_notify_api:app", host="127.0.0.1", port=8010, reload=True)
