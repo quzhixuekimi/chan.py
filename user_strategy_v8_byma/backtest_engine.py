@@ -62,16 +62,9 @@ class BymaBacktester:
     )
     self.df["idx"] = range(len(self.df))
 
-    self.df["blue_upper"] = self.df["high"].ewm(span=24, adjust=False).mean()
-    self.df["blue_lower"] = self.df["low"].ewm(span=23, adjust=False).mean()
-    self.df["yellow_upper"] = self.df["high"].ewm(span=89, adjust=False).mean()
-    self.df["yellow_lower"] = self.df["low"].ewm(span=90, adjust=False).mean()
+    from shared_indicators import compute_byma_indicators
 
-    self.df["ma55"] = self.df["close"].rolling(55, min_periods=55).mean()
-    self.df["ma60"] = self.df["close"].rolling(60, min_periods=60).mean()
-    self.df["ma65"] = self.df["close"].rolling(65, min_periods=65).mean()
-    self.df["ma120"] = self.df["close"].rolling(120, min_periods=120).mean()
-    self.df["ma250"] = self.df["close"].rolling(250, min_periods=250).mean()
+    self.df = compute_byma_indicators(self.df)
 
     self.df["yellow_upper_prev"] = self.df["yellow_upper"].shift(1)
     self.df["yellow_lower_prev"] = self.df["yellow_lower"].shift(1)

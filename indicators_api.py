@@ -262,17 +262,9 @@ def _build_indicators(code: str, level: LevelType) -> IndicatorsData:
 
   df = df.copy()
 
-  df["blue_upper"] = _ema(df["high"], 24)
-  df["blue_lower"] = _ema(df["low"], 23)
+  from shared_indicators import compute_byma_indicators
 
-  df["yellow_upper"] = _ema(df["high"], 89)
-  df["yellow_lower"] = _ema(df["low"], 90)
-
-  df["ma55"] = _sma(df["close"], 55)
-  df["ma60"] = _sma(df["close"], 60)
-  df["ma65"] = _sma(df["close"], 65)
-  df["ma120"] = _sma(df["close"], 120)
-  df["ma250"] = _sma(df["close"], 250)
+  df = compute_byma_indicators(df)
 
   td9_labels = _calc_td9_labels(df)
 

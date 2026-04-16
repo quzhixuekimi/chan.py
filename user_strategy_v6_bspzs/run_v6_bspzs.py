@@ -1250,6 +1250,8 @@ def main() -> None:
         kline_df = extract_kline_data(kllist)
         zs_df = extract_zs_data_from_chan_object(kllist)
         bsp_df = extract_bsp_data_from_chan_object(kllist)
+        if not bsp_df.empty and "is_sure" in bsp_df.columns:
+          bsp_df = bsp_df[bsp_df["is_sure"] == True].reset_index(drop=True)
         signal_events_df = build_v6_signal_events(symbol, tf.name, zs_df, bsp_df)
         signal_events_df = deduplicate_signal_events(signal_events_df)
         signal_digest_df = build_v6_signal_digest(signal_events_df)
