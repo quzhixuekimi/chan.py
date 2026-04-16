@@ -464,6 +464,7 @@ def build_chan_from_csv(code: str, level: LevelType):
       "bs_type": "1,2,3a,3b",
       "bsp1_only_multibi_zs": False,
       "min_zs_cnt": 0,
+      "zs_algo": "over_seg",
     }
   )
 
