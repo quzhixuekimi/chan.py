@@ -1238,15 +1238,16 @@ def main() -> None:
           print(f"{tf.name}/{tf.level} -> no csv found")
           continue
 
-        csvpath = matches[-1]
-        print(f"{tf.name}/{tf.level} -> {csvpath.name}")
+        # csvpath = matches[-1]
+        # print(f"{tf.name}/{tf.level} -> {csvpath.name}")
 
         _, _, kllist = load_chan_data(
           code=symbol,
           level=tf.level,
-          csvpath=csvpath,
+          # csv_path=csvpath,
           config=chan_config,
-          triggerstep=True,
+          trigger_step=True,
+          begin_time=getattr(tf, "start_time", None),
         )
 
         kline_df = extract_kline_data(kllist)
