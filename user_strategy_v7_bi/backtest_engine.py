@@ -130,6 +130,17 @@ class BiBacktester:
     trade_id = 0
 
     for bi in self.bi_list:
+      if not bi.get("is_sure", True):
+        self._record_signal_event(
+          event_type="BI_SKIPPED",
+          bi=bi,
+          bar_index=bi.get("end_index"),
+          event_time=bi.get("end_time"),
+          reason="bi_not_sure",
+          signal_text="跳过：当前笔未确认（顶分型尚未完成），不发出卖出信号",
+        )
+        continue
+
       if bi["direction"] != "up":
         self.trade_trace.append(
           {

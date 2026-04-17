@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
+from shared_chan_config import DEFAULT_CHAN_CONFIG
 
 
 @dataclass
@@ -50,8 +51,6 @@ class StrategyConfig:
   #    "min_zs_cnt": 0,
   #  }
   # )
-
-  from shared_chan_config import DEFAULT_CHAN_CONFIG
 
   chan_config: dict = field(default_factory=lambda: dict(DEFAULT_CHAN_CONFIG))
 
