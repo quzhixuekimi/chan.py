@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from .config import StrategyConfig
+from user_strategy_v6_bspzs.chan_loader import load_chan_data
 
 
 def save_df(df: pd.DataFrame, path: Path) -> None:
@@ -1002,121 +1003,121 @@ def build_v6_signal_events(
   return out
 
 
-def load_chan_data(
-  code: str,
-  level: str,
-  csvpath: Path,
-  config: dict,
-  triggerstep: bool = True,
-  begin_time: Optional[str] = None,
-  end_time: Optional[str] = None,
-):
-  from Chan import CChan
-  from ChanConfig import CChanConfig
-  from Common.CEnum import KL_TYPE
-
-  level = str(level).upper().strip()
-
-  if level == "1D":
-    kltype = KL_TYPE.K_DAY
-    data_src = "custom:OfflineUsDailyCsvAPI.COfflineUsDailyCsvAPI"
-  elif level == "4H":
-    kltype = KL_TYPE.K_60M
-    data_src = "custom:OfflineYFinanceIntradayCsvAPI.COfflineYFinance4HCsvAPI"
-  elif level == "2H":
-    kltype = KL_TYPE.K_60M
-    data_src = "custom:OfflineYFinanceIntradayCsvAPI.COfflineYFinance2HCsvAPI"
-  elif level == "1H":
-    kltype = KL_TYPE.K_60M
-    data_src = "custom:OfflineYFinanceIntradayCsvAPI.COfflineYFinance1HCsvAPI"
-  else:
-    raise ValueError(f"unsupported level: {level}")
-
-  chan_config = CChanConfig(
-    {
-      "bi_algo": config.get("bi_algo", "normal"),
-      "trigger_step": config.get("trigger_step", True),
-      "skip_step": config.get("skip_step", 0),
-      "divergence_rate": config.get("divergence_rate", float("inf")),
-      "bsp2_follow_1": config.get("bsp2_follow_1", True),
-      "bsp3_follow_1": config.get("bsp3_follow_1", True),
-      "strict_bsp3": config.get("strict_bsp3", False),
-      "bsp3_peak": config.get("bsp3_peak", False),
-      "bsp2s_follow_2": config.get("bsp2s_follow_2", False),
-      "max_bs2_rate": config.get("max_bs2_rate", 0.9999),
-      "macd_algo": config.get("macd_algo", "peak"),
-      "bs1_peak": config.get("bs1_peak", False),
-      "bs_type": config.get("bs_type", "1,2,3a,3b"),
-      "bsp1_only_multibi_zs": config.get("bsp1_only_multibi_zs", False),
-      "min_zs_cnt": config.get("min_zs_cnt", 0),
-    }
-  )
-
-  chan = CChan(
-    code=code.upper(),
-    begin_time=begin_time,
-    end_time=end_time,
-    data_src=data_src,
-    lv_list=[kltype],
-    config=chan_config,
-  )
-
-  def _extract_kllist_from_snapshot(snapshot: Any, kltype_obj: Any):
-    if snapshot is None:
-      return None
-
-    if isinstance(snapshot, dict):
-      if kltype_obj in snapshot:
-        return snapshot[kltype_obj]
-      if str(kltype_obj) in snapshot:
-        return snapshot[str(kltype_obj)]
-      vals = list(snapshot.values())
-      if len(vals) == 1:
-        return vals[0]
-
-    try:
-      return snapshot[kltype_obj]
-    except Exception:
-      pass
-
-    if hasattr(snapshot, "get"):
-      try:
-        val = snapshot.get(kltype_obj)
-        if val is not None:
-          return val
-      except Exception:
-        pass
-
-    if hasattr(snapshot, "kl_datas"):
-      try:
-        val = snapshot.kl_datas[kltype_obj]
-        if val is not None:
-          return val
-      except Exception:
-        pass
-
-    return None
-
-  last_kllist = None
-
-  if triggerstep:
-    for snapshot in chan.step_load():
-      extracted = _extract_kllist_from_snapshot(snapshot, kltype)
-      if extracted is not None:
-        last_kllist = extracted
-
-    if last_kllist is None:
-      try:
-        last_kllist = chan.kl_datas[kltype]
-      except Exception:
-        pass
-  else:
-    last_kllist = chan.kl_datas[kltype]
-
-  if last_kllist is None:
-    raise ValueError("chan step_load returned no usable snapshot")
-
-  return chan, kltype, last_kllist
+# def load_chan_data(
+#  code: str,
+#  level: str,
+#  csvpath: Path,
+#  config: dict,
+#  triggerstep: bool = True,
+#  begin_time: Optional[str] = None,
+#  end_time: Optional[str] = None,
+# ):
+#  from Chan import CChan
+#  from ChanConfig import CChanConfig
+#  from Common.CEnum import KL_TYPE
+#
+#  level = str(level).upper().strip()
+#
+#  if level == "1D":
+#    kltype = KL_TYPE.K_DAY
+#    data_src = "custom:OfflineUsDailyCsvAPI.COfflineUsDailyCsvAPI"
+#  elif level == "4H":
+#    kltype = KL_TYPE.K_60M
+#    data_src = "custom:OfflineYFinanceIntradayCsvAPI.COfflineYFinance4HCsvAPI"
+#  elif level == "2H":
+#    kltype = KL_TYPE.K_60M
+#    data_src = "custom:OfflineYFinanceIntradayCsvAPI.COfflineYFinance2HCsvAPI"
+#  elif level == "1H":
+#    kltype = KL_TYPE.K_60M
+#    data_src = "custom:OfflineYFinanceIntradayCsvAPI.COfflineYFinance1HCsvAPI"
+#  else:
+#    raise ValueError(f"unsupported level: {level}")
+#
+#  chan_config = CChanConfig(
+#    {
+#      "bi_algo": config.get("bi_algo", "normal"),
+#      "trigger_step": config.get("trigger_step", True),
+#      "skip_step": config.get("skip_step", 0),
+#      "divergence_rate": config.get("divergence_rate", float("inf")),
+#      "bsp2_follow_1": config.get("bsp2_follow_1", True),
+#      "bsp3_follow_1": config.get("bsp3_follow_1", True),
+#      "strict_bsp3": config.get("strict_bsp3", False),
+#      "bsp3_peak": config.get("bsp3_peak", False),
+#      "bsp2s_follow_2": config.get("bsp2s_follow_2", False),
+#      "max_bs2_rate": config.get("max_bs2_rate", 0.9999),
+#      "macd_algo": config.get("macd_algo", "peak"),
+#      "bs1_peak": config.get("bs1_peak", False),
+#      "bs_type": config.get("bs_type", "1,2,3a,3b"),
+#      "bsp1_only_multibi_zs": config.get("bsp1_only_multibi_zs", False),
+#      "min_zs_cnt": config.get("min_zs_cnt", 0),
+#    }
+#  )
+#
+#  chan = CChan(
+#    code=code.upper(),
+#    begin_time=begin_time,
+#    end_time=end_time,
+#    data_src=data_src,
+#    lv_list=[kltype],
+#    config=chan_config,
+#  )
+#
+#  def _extract_kllist_from_snapshot(snapshot: Any, kltype_obj: Any):
+#    if snapshot is None:
+#      return None
+#
+#    if isinstance(snapshot, dict):
+#      if kltype_obj in snapshot:
+#        return snapshot[kltype_obj]
+#      if str(kltype_obj) in snapshot:
+#        return snapshot[str(kltype_obj)]
+#      vals = list(snapshot.values())
+#      if len(vals) == 1:
+#        return vals[0]
+#
+#    try:
+#      return snapshot[kltype_obj]
+#    except Exception:
+#      pass
+#
+#    if hasattr(snapshot, "get"):
+#      try:
+#        val = snapshot.get(kltype_obj)
+#        if val is not None:
+#          return val
+#      except Exception:
+#        pass
+#
+#    if hasattr(snapshot, "kl_datas"):
+#      try:
+#        val = snapshot.kl_datas[kltype_obj]
+#        if val is not None:
+#          return val
+#      except Exception:
+#        pass
+#
+#    return None
+#
+#  last_kllist = None
+#
+#  if triggerstep:
+#    for snapshot in chan.step_load():
+#      extracted = _extract_kllist_from_snapshot(snapshot, kltype)
+#      if extracted is not None:
+#        last_kllist = extracted
+#
+#    if last_kllist is None:
+#      try:
+#        last_kllist = chan.kl_datas[kltype]
+#      except Exception:
+#        pass
+#  else:
+#    last_kllist = chan.kl_datas[kltype]
+#
+#  if last_kllist is None:
+#    raise ValueError("chan step_load returned no usable snapshot")
+#
+#  return chan, kltype, last_kllist
 
 
 def extract_kline_data(kllist: Any) -> pd.DataFrame:
@@ -1202,23 +1203,24 @@ def main() -> None:
     TF("1h", "1H"),
   ]
 
-  chan_config = {
-    "bi_algo": getattr(conf, "bi_algo", "normal"),
-    "trigger_step": True,
-    "skip_step": getattr(conf, "skip_step", 0),
-    "divergence_rate": getattr(conf, "divergence_rate", float("inf")),
-    "bsp2_follow_1": getattr(conf, "bsp2_follow_1", True),
-    "bsp3_follow_1": getattr(conf, "bsp3_follow_1", True),
-    "strict_bsp3": getattr(conf, "strict_bsp3", False),
-    "bsp3_peak": getattr(conf, "bsp3_peak", False),
-    "bsp2s_follow_2": getattr(conf, "bsp2s_follow_2", False),
-    "max_bs2_rate": getattr(conf, "max_bs2_rate", 0.9999),
-    "macd_algo": getattr(conf, "macd_algo", "peak"),
-    "bs1_peak": getattr(conf, "bs1_peak", False),
-    "bs_type": getattr(conf, "bs_type", "1,2,3a,3b"),
-    "bsp1_only_multibi_zs": getattr(conf, "bsp1_only_multibi_zs", False),
-    "min_zs_cnt": getattr(conf, "min_zs_cnt", 0),
-  }
+  chan_config = conf.chan_config
+  # chan_config = {
+  #  "bi_algo": getattr(conf, "bi_algo", "normal"),
+  #  "trigger_step": True,
+  #  "skip_step": getattr(conf, "skip_step", 0),
+  #  "divergence_rate": getattr(conf, "divergence_rate", float("inf")),
+  #  "bsp2_follow_1": getattr(conf, "bsp2_follow_1", True),
+  #  "bsp3_follow_1": getattr(conf, "bsp3_follow_1", True),
+  #  "strict_bsp3": getattr(conf, "strict_bsp3", False),
+  #  "bsp3_peak": getattr(conf, "bsp3_peak", False),
+  #  "bsp2s_follow_2": getattr(conf, "bsp2s_follow_2", False),
+  #  "max_bs2_rate": getattr(conf, "max_bs2_rate", 0.9999),
+  #  "macd_algo": getattr(conf, "macd_algo", "peak"),
+  #  "bs1_peak": getattr(conf, "bs1_peak", False),
+  #  "bs_type": getattr(conf, "bs_type", "1,2,3a,3b"),
+  #  "bsp1_only_multibi_zs": getattr(conf, "bsp1_only_multibi_zs", False),
+  #  "min_zs_cnt": getattr(conf, "min_zs_cnt", 0),
+  # }
 
   market_signal_events: List[pd.DataFrame] = []
   market_signal_digest: List[pd.DataFrame] = []

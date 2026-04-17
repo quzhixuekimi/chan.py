@@ -447,26 +447,32 @@ def build_chan_from_csv(code: str, level: LevelType):
 
   trigger_step = True
 
-  config = CChanConfig(
-    {
-      "bi_algo": "normal",
-      "trigger_step": trigger_step,
-      "skip_step": 0,
-      "divergence_rate": float("inf"),
-      "bsp2_follow_1": True,
-      "bsp3_follow_1": True,
-      "strict_bsp3": False,
-      "bsp3_peak": False,
-      "bsp2s_follow_2": False,
-      "max_bs2_rate": 0.9999,
-      "macd_algo": "peak",
-      "bs1_peak": False,
-      "bs_type": "1,2,3a,3b",
-      "bsp1_only_multibi_zs": False,
-      "min_zs_cnt": 0,
-      "zs_algo": "over_seg",
-    }
-  )
+  from shared_chan_config import DEFAULT_CHAN_CONFIG
+
+  cfg = dict(DEFAULT_CHAN_CONFIG)  # 浅拷贝，避免污染原始字典
+  cfg["trigger_step"] = trigger_step  # trigger_step 是动态的，单独覆盖
+  config = CChanConfig(cfg)
+
+  # config = CChanConfig(
+  #  {
+  #    "bi_algo": "normal",
+  #    "trigger_step": trigger_step,
+  #    "skip_step": 0,
+  #    "divergence_rate": float("inf"),
+  #    "bsp2_follow_1": True,
+  #    "bsp3_follow_1": True,
+  #    "strict_bsp3": False,
+  #    "bsp3_peak": False,
+  #    "bsp2s_follow_2": False,
+  #    "max_bs2_rate": 0.9999,
+  #    "macd_algo": "peak",
+  #    "bs1_peak": False,
+  #    "bs_type": "1,2,3a,3b",
+  #    "bsp1_only_multibi_zs": False,
+  #    "min_zs_cnt": 0,
+  #    "zs_algo": "over_seg",
+  #  }
+  # )
 
   # 使用你确认能正常运行的配置
   # config = CChanConfig(

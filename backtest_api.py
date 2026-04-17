@@ -11,6 +11,7 @@ import time
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 router = APIRouter()
 
@@ -396,9 +397,18 @@ def run_backtest(req: BacktestRunRequest):
     strategy_ids = _resolve_strategy_ids(req)
     strategy_items = _validate_strategy_ids(strategy_ids)
 
-    results: list[StrategyRunResult] = []
-    for item in strategy_items:
-      results.append(_run_one_strategy(item, override_timeout=req.timeout_seconds))
+    results_map: dict = {}
+    with ThreadPoolExecutor(max_workers=len(strategy_items)) as executor:
+      futures = {
+        executor.submit(_run_one_strategy, item, req.timeout_seconds): item.strategy_id
+        for item in strategy_items
+      }
+      for future in as_completed(futures):
+        sid = futures[future]
+        results_map[sid] = future.result()
+
+    # 保持原来的顺序（v6→v7→v8→v9），不按完成顺序
+    results = [results_map[item.strategy_id] for item in strategy_items]
 
     requested = [item.strategy_id for item in strategy_items]
     success_count = sum(1 for x in results if x.success)

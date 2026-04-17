@@ -404,7 +404,10 @@ def send_digest(req: TelegramDigestRequest):
   new_state_items: dict = {}
 
   for row in rows:
+    # text = str(row.get("summary_text", "")).strip()
     text = str(row.get("summary_text", "")).strip()
+    if text:
+      text = f"[{req.strategy_id}]\n{text}"
     if not text:
       continue
 

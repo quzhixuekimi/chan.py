@@ -35,25 +35,28 @@ class StrategyConfig:
   use_structure_stop: bool = True
   trigger_step: bool = True
 
-  chan_config: dict = field(
-    default_factory=lambda: {
-      "bi_algo": "normal",
-      "trigger_step": True,
-      "skip_step": 0,
-      "divergence_rate": float("inf"),
-      "bsp2_follow_1": True,
-      "bsp3_follow_1": True,
-      "strict_bsp3": False,
-      "bsp3_peak": False,
-      "bsp2s_follow_2": False,
-      "max_bs2_rate": 0.9999,
-      "macd_algo": "peak",
-      "bs1_peak": False,
-      "bs_type": "1,2,3a,3b",
-      "bsp1_only_multibi_zs": False,
-      "min_zs_cnt": 0,
-    }
-  )
+  from shared_chan_config import DEFAULT_CHAN_CONFIG
+
+  chan_config: dict = field(default_factory=lambda: dict(DEFAULT_CHAN_CONFIG))
+  # chan_config: dict = field(
+  #  default_factory=lambda: {
+  #    "bi_algo": "normal",
+  #    "trigger_step": True,
+  #    "skip_step": 0,
+  #    "divergence_rate": float("inf"),
+  #    "bsp2_follow_1": True,
+  #    "bsp3_follow_1": True,
+  #    "strict_bsp3": False,
+  #    "bsp3_peak": False,
+  #    "bsp2s_follow_2": False,
+  #    "max_bs2_rate": 0.9999,
+  #    "macd_algo": "peak",
+  #    "bs1_peak": False,
+  #    "bs_type": "1,2,3a,3b",
+  #    "bsp1_only_multibi_zs": False,
+  #    "min_zs_cnt": 0,
+  #  }
+  # )
 
   def resolved_data_dir(self, repo_root: Path) -> Path:
     return repo_root / self.data_dir
