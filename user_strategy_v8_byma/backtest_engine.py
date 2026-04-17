@@ -136,6 +136,7 @@ class BymaBacktester:
       & self.df["entry_ready_state"]
       & (self.df["close"] > self.df["close_prev"])
     )
+    self.df["entry_regime_first_state"] = self.df["entry_ready_state"]
 
   def _row_time(self, idx: int) -> str:
     if idx < 0 or idx >= len(self.df):
@@ -274,6 +275,7 @@ class BymaBacktester:
       cur_bull_confirmed = bool(cur["bull_env_confirmed_state"])
 
       cur_entry_cross_up = bool(cur["entry_cross_up_state"])
+      cur_entry_regime_first = bool(cur["entry_regime_first_state"])
       cur_weaken = bool(cur["weaken_state"])
       cur_exit = bool(cur["exit_trend_state"])
       cur_stop = bool(cur["stop_loss_state"])
@@ -438,7 +440,7 @@ class BymaBacktester:
         weaken_alert_armed = False
 
       entry_first_in_regime = (
-        bull_regime_active and cur_entry_cross_up and (not entry_fired_in_regime)
+        bull_regime_active and cur_entry_regime_first and (not entry_fired_in_regime)
       )
 
       if entry_first_in_regime:
@@ -446,7 +448,7 @@ class BymaBacktester:
           event_type="LONG_ENTRY_READY",
           idx=i,
           reason="entry_cross_up_first_in_confirmed_bull_regime",
-          signal_text=f"买入信号：多头环境已连续{self.bull_confirm_bars}根确认，且入场条件从不满足切换为满足，当前收盘强于前一根，并通过高周期方向过滤，作为本轮 bull regime 的首次买点。",
+          signal_text=f"买入信号：蓝梯子穿出黄梯子，多头环境已连续{self.bull_confirm_bars}根确认，收盘在蓝梯子上方且高于MA55/60/65，本轮 bull regime 的首次买点。",
           priority=4,
           stop_price=cur["blue_lower"],
           extra={
