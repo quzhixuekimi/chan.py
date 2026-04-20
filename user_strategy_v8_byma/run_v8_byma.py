@@ -87,6 +87,7 @@ def deduplicate_signal_events(df: pd.DataFrame) -> pd.DataFrame:
     "trade_id",
     "event_seq",
     "bull_regime_id",
+    "cycle_id",
     "entry_blocked_in_regime",
   ]:
     if col not in result.columns:
@@ -107,6 +108,7 @@ def deduplicate_signal_events(df: pd.DataFrame) -> pd.DataFrame:
       "bar_index",
       "trade_id",
       "bull_regime_id",
+      "cycle_id",
     ],
     keep="first",
   ).reset_index(drop=True)
@@ -138,6 +140,12 @@ def build_signal_digest(df: pd.DataFrame) -> pd.DataFrame:
     "reason",
     "signal_text",
     "bull_regime_id",
+    "cycle_id",
+    "cycle_trade_no",
+    "cycle_status",
+    "cycle_trade_count",
+    "cycle_closed_trade_count",
+    "cycle_total_pnl_pct",
     "entry_blocked_in_regime",
   ]:
     if col not in xdf.columns:
@@ -166,6 +174,12 @@ def build_signal_digest(df: pd.DataFrame) -> pd.DataFrame:
         "reason": latest.get("reason", ""),
         "signal_text": latest.get("signal_text", ""),
         "bull_regime_id": latest.get("bull_regime_id", None),
+        "cycle_id": latest.get("cycle_id", None),
+        "cycle_trade_no": latest.get("cycle_trade_no", None),
+        "cycle_status": latest.get("cycle_status", ""),
+        "cycle_trade_count": latest.get("cycle_trade_count", None),
+        "cycle_closed_trade_count": latest.get("cycle_closed_trade_count", None),
+        "cycle_total_pnl_pct": latest.get("cycle_total_pnl_pct", None),
         "entry_blocked_in_regime": latest.get("entry_blocked_in_regime", False),
         "event_count": int(len(grp)),
       }
@@ -214,6 +228,15 @@ def _format_price(v) -> str:
     return str(v)
 
 
+def _format_pct(v) -> str:
+  if pd.isna(v):
+    return ""
+  try:
+    return f"{float(v):.2f}%"
+  except Exception:
+    return str(v)
+
+
 def _ensure_event_columns(df: pd.DataFrame) -> pd.DataFrame:
   out = df.copy()
   if "symbol" not in out.columns:
@@ -239,6 +262,18 @@ def _ensure_event_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["latest_event_type"] = out["event_type"] if "event_type" in out.columns else ""
   if "bull_regime_id" not in out.columns:
     out["bull_regime_id"] = None
+  if "cycle_id" not in out.columns:
+    out["cycle_id"] = None
+  if "cycle_trade_no" not in out.columns:
+    out["cycle_trade_no"] = None
+  if "cycle_status" not in out.columns:
+    out["cycle_status"] = ""
+  if "cycle_trade_count" not in out.columns:
+    out["cycle_trade_count"] = None
+  if "cycle_closed_trade_count" not in out.columns:
+    out["cycle_closed_trade_count"] = None
+  if "cycle_total_pnl_pct" not in out.columns:
+    out["cycle_total_pnl_pct"] = None
   if "entry_blocked_in_regime" not in out.columns:
     out["entry_blocked_in_regime"] = False
 
@@ -291,6 +326,12 @@ def build_readable_signal_events(df: pd.DataFrame) -> pd.DataFrame:
     "reason",
     "signal_text",
     "bull_regime_id",
+    "cycle_id",
+    "cycle_trade_no",
+    "cycle_status",
+    "cycle_trade_count",
+    "cycle_closed_trade_count",
+    "cycle_total_pnl_pct",
     "entry_blocked_in_regime",
     "event_count",
     "readable_text",
@@ -324,6 +365,12 @@ def build_readable_signal_events(df: pd.DataFrame) -> pd.DataFrame:
       f"{' | latest_price=' + _format_price(r['latest_price']) if _format_price(r['latest_price']) else ''}"
       f"{' | stop_price=' + _format_price(r['stop_price']) if _format_price(r['stop_price']) else ''}"
       f"{' | regime=' + str(int(float(r['bull_regime_id']))) if pd.notna(r['bull_regime_id']) and str(r['bull_regime_id']) != '' else ''}"
+      f"{' | cycle=' + str(int(float(r['cycle_id']))) if pd.notna(r['cycle_id']) and str(r['cycle_id']) != '' else ''}"
+      f"{' | cycle_trade_no=' + str(int(float(r['cycle_trade_no']))) if pd.notna(r['cycle_trade_no']) and str(r['cycle_trade_no']) != '' else ''}"
+      f"{' | cycle_status=' + str(r['cycle_status']) if pd.notna(r['cycle_status']) and str(r['cycle_status']).strip() else ''}"
+      f"{' | cycle_trade_count=' + str(int(float(r['cycle_trade_count']))) if pd.notna(r['cycle_trade_count']) and str(r['cycle_trade_count']) != '' else ''}"
+      f"{' | cycle_closed_trade_count=' + str(int(float(r['cycle_closed_trade_count']))) if pd.notna(r['cycle_closed_trade_count']) and str(r['cycle_closed_trade_count']) != '' else ''}"
+      f"{' | cycle_pnl=' + _format_pct(r['cycle_total_pnl_pct']) if _format_pct(r['cycle_total_pnl_pct']) else ''}"
       f"{' | reason=' + str(r['reason']) if pd.notna(r['reason']) and str(r['reason']).strip() else ''}"
     ),
     axis=1,
@@ -343,6 +390,12 @@ def build_last_events_per_symbol_timeframe(readable_df: pd.DataFrame) -> pd.Data
     "reason",
     "signal_text",
     "bull_regime_id",
+    "cycle_id",
+    "cycle_trade_no",
+    "cycle_status",
+    "cycle_trade_count",
+    "cycle_closed_trade_count",
+    "cycle_total_pnl_pct",
     "entry_blocked_in_regime",
     "event_count",
     "readable_text",
@@ -432,24 +485,48 @@ def build_last_digest_by_symbol(
     "1d_latest_price",
     "1d_stop_price",
     "1d_bull_regime_id",
+    "1d_cycle_id",
+    "1d_cycle_trade_no",
+    "1d_cycle_status",
+    "1d_cycle_trade_count",
+    "1d_cycle_closed_trade_count",
+    "1d_cycle_total_pnl_pct",
     "4h_event_type",
     "4h_signal_text",
     "4h_event_time",
     "4h_latest_price",
     "4h_stop_price",
     "4h_bull_regime_id",
+    "4h_cycle_id",
+    "4h_cycle_trade_no",
+    "4h_cycle_status",
+    "4h_cycle_trade_count",
+    "4h_cycle_closed_trade_count",
+    "4h_cycle_total_pnl_pct",
     "2h_event_type",
     "2h_signal_text",
     "2h_event_time",
     "2h_latest_price",
     "2h_stop_price",
     "2h_bull_regime_id",
+    "2h_cycle_id",
+    "2h_cycle_trade_no",
+    "2h_cycle_status",
+    "2h_cycle_trade_count",
+    "2h_cycle_closed_trade_count",
+    "2h_cycle_total_pnl_pct",
     "1h_event_type",
     "1h_signal_text",
     "1h_event_time",
     "1h_latest_price",
     "1h_stop_price",
     "1h_bull_regime_id",
+    "1h_cycle_id",
+    "1h_cycle_trade_no",
+    "1h_cycle_status",
+    "1h_cycle_trade_count",
+    "1h_cycle_closed_trade_count",
+    "1h_cycle_total_pnl_pct",
     "has_signal",
     "summary_text",
     "summary_json",
@@ -501,6 +578,12 @@ def build_last_digest_by_symbol(
         item[f"{tf}_latest_price"] = ""
         item[f"{tf}_stop_price"] = ""
         item[f"{tf}_bull_regime_id"] = ""
+        item[f"{tf}_cycle_id"] = ""
+        item[f"{tf}_cycle_trade_no"] = ""
+        item[f"{tf}_cycle_status"] = ""
+        item[f"{tf}_cycle_trade_count"] = ""
+        item[f"{tf}_cycle_closed_trade_count"] = ""
+        item[f"{tf}_cycle_total_pnl_pct"] = ""
         tf_payload[tf] = {
           "event_type": "",
           "signal_text": "",
@@ -508,6 +591,12 @@ def build_last_digest_by_symbol(
           "latest_price": "",
           "stop_price": "",
           "bull_regime_id": "",
+          "cycle_id": "",
+          "cycle_trade_no": "",
+          "cycle_status": "",
+          "cycle_trade_count": "",
+          "cycle_closed_trade_count": "",
+          "cycle_total_pnl_pct": "",
           "is_fresh": False,
           "age_days": None,
           "telegram_allowed": False,
@@ -526,17 +615,49 @@ def build_last_digest_by_symbol(
 
       telegram_allowed = raw_event_type in TELEGRAM_DIGEST_EVENT_TYPES
 
+      bull_regime_id = (
+        str(int(float(r.get("bull_regime_id"))))
+        if pd.notna(r.get("bull_regime_id")) and str(r.get("bull_regime_id")) != ""
+        else ""
+      )
+      cycle_id = (
+        str(int(float(r.get("cycle_id"))))
+        if pd.notna(r.get("cycle_id")) and str(r.get("cycle_id")) != ""
+        else ""
+      )
+      cycle_trade_no = (
+        str(int(float(r.get("cycle_trade_no"))))
+        if pd.notna(r.get("cycle_trade_no")) and str(r.get("cycle_trade_no")) != ""
+        else ""
+      )
+      cycle_trade_count = (
+        str(int(float(r.get("cycle_trade_count"))))
+        if pd.notna(r.get("cycle_trade_count"))
+        and str(r.get("cycle_trade_count")) != ""
+        else ""
+      )
+      cycle_closed_trade_count = (
+        str(int(float(r.get("cycle_closed_trade_count"))))
+        if pd.notna(r.get("cycle_closed_trade_count"))
+        and str(r.get("cycle_closed_trade_count")) != ""
+        else ""
+      )
+      cycle_total_pnl_pct = _format_pct(r.get("cycle_total_pnl_pct"))
+      cycle_status = str(r.get("cycle_status", "") or "")
+
       if is_fresh and telegram_allowed:
         item[f"{tf}_event_type"] = raw_event_type
         item[f"{tf}_signal_text"] = r.get("signal_text", "")
         item[f"{tf}_event_time"] = r.get("latest_event_time", "")
         item[f"{tf}_latest_price"] = _format_price(r.get("latest_price"))
         item[f"{tf}_stop_price"] = _format_price(r.get("stop_price"))
-        item[f"{tf}_bull_regime_id"] = (
-          str(int(float(r.get("bull_regime_id"))))
-          if pd.notna(r.get("bull_regime_id")) and str(r.get("bull_regime_id")) != ""
-          else ""
-        )
+        item[f"{tf}_bull_regime_id"] = bull_regime_id
+        item[f"{tf}_cycle_id"] = cycle_id
+        item[f"{tf}_cycle_trade_no"] = cycle_trade_no
+        item[f"{tf}_cycle_status"] = cycle_status
+        item[f"{tf}_cycle_trade_count"] = cycle_trade_count
+        item[f"{tf}_cycle_closed_trade_count"] = cycle_closed_trade_count
+        item[f"{tf}_cycle_total_pnl_pct"] = cycle_total_pnl_pct
       else:
         item[f"{tf}_event_type"] = ""
         item[f"{tf}_signal_text"] = ""
@@ -544,6 +665,12 @@ def build_last_digest_by_symbol(
         item[f"{tf}_latest_price"] = ""
         item[f"{tf}_stop_price"] = ""
         item[f"{tf}_bull_regime_id"] = ""
+        item[f"{tf}_cycle_id"] = ""
+        item[f"{tf}_cycle_trade_no"] = ""
+        item[f"{tf}_cycle_status"] = ""
+        item[f"{tf}_cycle_trade_count"] = ""
+        item[f"{tf}_cycle_closed_trade_count"] = ""
+        item[f"{tf}_cycle_total_pnl_pct"] = ""
 
       tf_payload[tf] = {
         "event_type": raw_event_type,
@@ -551,11 +678,13 @@ def build_last_digest_by_symbol(
         "event_time": r.get("latest_event_time", ""),
         "latest_price": _format_price(r.get("latest_price")),
         "stop_price": _format_price(r.get("stop_price")),
-        "bull_regime_id": (
-          str(int(float(r.get("bull_regime_id"))))
-          if pd.notna(r.get("bull_regime_id")) and str(r.get("bull_regime_id")) != ""
-          else ""
-        ),
+        "bull_regime_id": bull_regime_id,
+        "cycle_id": cycle_id,
+        "cycle_trade_no": cycle_trade_no,
+        "cycle_status": cycle_status,
+        "cycle_trade_count": cycle_trade_count,
+        "cycle_closed_trade_count": cycle_closed_trade_count,
+        "cycle_total_pnl_pct": cycle_total_pnl_pct,
         "is_fresh": is_fresh,
         "age_days": age_days,
         "telegram_allowed": telegram_allowed,
@@ -573,6 +702,12 @@ def build_last_digest_by_symbol(
       latest_price = item.get(f"{tf}_latest_price", "")
       stop_price = item.get(f"{tf}_stop_price", "")
       bull_regime_id = item.get(f"{tf}_bull_regime_id", "")
+      cycle_id = item.get(f"{tf}_cycle_id", "")
+      cycle_trade_no = item.get(f"{tf}_cycle_trade_no", "")
+      cycle_status = item.get(f"{tf}_cycle_status", "")
+      cycle_trade_count = item.get(f"{tf}_cycle_trade_count", "")
+      cycle_closed_trade_count = item.get(f"{tf}_cycle_closed_trade_count", "")
+      cycle_total_pnl_pct = item.get(f"{tf}_cycle_total_pnl_pct", "")
       tf_label = tf.upper()
 
       if event_type:
@@ -587,6 +722,18 @@ def build_last_digest_by_symbol(
           extra.append(f"stop={stop_price}")
         if bull_regime_id:
           extra.append(f"regime={bull_regime_id}")
+        if cycle_id:
+          extra.append(f"cycle={cycle_id}")
+        if cycle_trade_no:
+          extra.append(f"trade_no={cycle_trade_no}")
+        if cycle_status:
+          extra.append(f"cycle_status={cycle_status}")
+        if cycle_trade_count:
+          extra.append(f"cycle_trades={cycle_trade_count}")
+        if cycle_closed_trade_count:
+          extra.append(f"cycle_closed={cycle_closed_trade_count}")
+        if cycle_total_pnl_pct:
+          extra.append(f"cycle_pnl={cycle_total_pnl_pct}")
         tf_lines.append(f"{tf_label}: {event_type} | " + " | ".join(extra))
       else:
         tf_lines.append(f"{tf_label}: 无信号")
@@ -665,11 +812,11 @@ def compute_trend_filter_flags(df: pd.DataFrame) -> pd.DataFrame:
   x["blue_over_yellow"] = (x["blue_upper"] >= x["yellow_upper"]) & (
     x["blue_lower"] >= x["yellow_lower"]
   )
-  x["blue_below_yellow"] = (x["blue_upper"] <= x["yellow_upper"]) & (
-    x["blue_lower"] <= x["yellow_lower"]
+  x["blue_below_yellow"] = (x["blue_upper"] < x["yellow_upper"]) & (
+    x["blue_lower"] < x["yellow_lower"]
   )
   x["bull_env_ready_state"] = x["blue_over_yellow"] & x["yellow_rising"]
-  x["exit_trend_state"] = x["blue_below_yellow"]
+  x["exit_trend_state"] = x["blue_below_yellow"] & (x["close"] < x["yellow_lower"])
   x["higher_tf_trend_ok"] = x["bull_env_ready_state"] & (~x["exit_trend_state"])
   return x[["dt", "higher_tf_trend_ok"]].copy()
 
@@ -801,6 +948,7 @@ def main():
 
         save_df(indicators_df, out_dir / f"{symbol}_{tf.name}_ohlcv_v8_byma.csv")
         save_df(bt.trades_df(), out_dir / f"{symbol}_{tf.name}_trades_v8_byma.csv")
+        save_df(bt.cycles_df(), out_dir / f"{symbol}_{tf.name}_cycles_v8_byma.csv")
         save_df(
           bt.trade_trace_df(), out_dir / f"{symbol}_{tf.name}_trade_trace_v8_byma.csv"
         )
@@ -826,6 +974,7 @@ def main():
 
         print(
           f" - 完成，生成 {len(bt.trades)} 笔交易，"
+          f"{len(bt.cycles)} 个完整周期，"
           f"{len(signal_events_df)} 条信号事件，"
           f"{len(signal_digest_df)} 条信号摘要，"
           f"params=(bull_confirm_bars={bull_confirm_bars}, cooldown={regime_cooldown_bars}, higher_tf_filter={higher_tf_filter_name or 'NONE'})"

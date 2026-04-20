@@ -501,7 +501,10 @@ def main() -> None:
   scheduler.add_job(
     run_daily_workflow,
     trigger=CronTrigger(
-      hour=config.cron_hour, minute=config.cron_minute, timezone=config.timezone
+      day_of_week="tue-sat",
+      hour=config.cron_hour,
+      minute=config.cron_minute,
+      timezone=config.timezone,
     ),
     args=[config],
     id="chan_daily_workflow",

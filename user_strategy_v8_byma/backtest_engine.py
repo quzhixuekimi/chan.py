@@ -30,9 +30,11 @@ class BymaBacktester:
     self.signal_events: List[Dict[str, Any]] = []
     self.trade_trace: List[Dict[str, Any]] = []
     self.trades: List[Dict[str, Any]] = []
+    self.cycles: List[Dict[str, Any]] = []
 
     self._signal_event_seq = 0
     self._trade_id_seq = 0
+    self._cycle_id_seq = 0
     self._prepare_dataframe()
 
   def _prepare_dataframe(self):
@@ -75,9 +77,9 @@ class BymaBacktester:
     self.df["blue_over_yellow"] = (self.df["blue_upper"] >= self.df["yellow_upper"]) & (
       self.df["blue_lower"] >= self.df["yellow_lower"]
     )
-    self.df["blue_below_yellow"] = (
-      self.df["blue_upper"] <= self.df["yellow_upper"]
-    ) & (self.df["blue_lower"] <= self.df["yellow_lower"])
+    self.df["blue_below_yellow"] = (self.df["blue_upper"] < self.df["yellow_upper"]) & (
+      self.df["blue_lower"] < self.df["yellow_lower"]
+    )
 
     self.df["in_blue_band"] = (self.df["close"] <= self.df["blue_upper"]) & (
       self.df["close"] >= self.df["blue_lower"]
@@ -99,12 +101,13 @@ class BymaBacktester:
       self.df["blue_over_yellow"] & self.df["yellow_rising"]
     )
 
-    self.df["entry_ready_state_raw"] = (
+    bull_confirm = (
       self.df["bull_env_ready_state"]
-      & (self.df["in_blue_band"] | self.df["above_blue_upper"])
-      & (self.df["close"] > self.df["blue_lower"])
-      & self.df["above_ma55_60_65"]
+      .rolling(self.bull_confirm_bars, min_periods=self.bull_confirm_bars)
+      .sum()
+      .eq(self.bull_confirm_bars)
     )
+    self.df["bull_env_confirmed_state"] = bull_confirm.fillna(False)
 
     if self.external_trend_ok_series is None:
       self.df["external_trend_ok"] = True
@@ -114,29 +117,36 @@ class BymaBacktester:
         raise ValueError("external_trend_ok_series length mismatch")
       self.df["external_trend_ok"] = ext.fillna(False).astype(bool)
 
+    self.df["close_prev_1"] = self.df["close"].shift(1)
+    self.df["close_prev_2"] = self.df["close"].shift(2)
+    self.df["blue_lower_prev_1"] = self.df["blue_lower"].shift(1)
+    self.df["blue_lower_prev_2"] = self.df["blue_lower"].shift(2)
+
+    self.df["initial_entry_ready_state"] = (
+      self.df["bull_env_confirmed_state"]
+      & self.df["external_trend_ok"]
+      & (self.df["in_blue_band"] | self.df["above_blue_upper"])
+      & (self.df["close"] > self.df["blue_lower"])
+      & self.df["above_ma55_60_65"]
+    )
+
+    self.df["reentry_ready_state"] = (
+      self.df["external_trend_ok"]
+      & (self.df["close"] > self.df["blue_lower"])
+      & (self.df["close_prev_1"] < self.df["blue_lower_prev_1"])
+      & (self.df["close_prev_2"] < self.df["blue_lower_prev_2"])
+    )
+
     self.df["entry_ready_state"] = (
-      self.df["entry_ready_state_raw"] & self.df["external_trend_ok"]
+      self.df["initial_entry_ready_state"] | self.df["reentry_ready_state"]
     )
 
     self.df["weaken_state"] = self.df["close"] < self.df["blue_lower"]
-    self.df["exit_trend_state"] = self.df["blue_below_yellow"]
     self.df["stop_loss_state"] = self.df["weaken_state"] & self.df["below_ma55_60_65"]
 
-    bull_confirm = (
-      self.df["bull_env_ready_state"]
-      .rolling(self.bull_confirm_bars, min_periods=self.bull_confirm_bars)
-      .sum()
-      .eq(self.bull_confirm_bars)
+    self.df["exit_trend_state"] = self.df["blue_below_yellow"] & (
+      self.df["close"] < self.df["yellow_lower"]
     )
-    self.df["bull_env_confirmed_state"] = bull_confirm.fillna(False)
-
-    self.df["close_prev"] = self.df["close"].shift(1)
-    self.df["entry_cross_up_state"] = (
-      (~self.df["entry_ready_state"].shift(1).fillna(False))
-      & self.df["entry_ready_state"]
-      & (self.df["close"] > self.df["close_prev"])
-    )
-    self.df["entry_regime_first_state"] = self.df["entry_ready_state"]
 
   def _row_time(self, idx: int) -> str:
     if idx < 0 or idx >= len(self.df):
@@ -189,6 +199,12 @@ class BymaBacktester:
       "structure_type": "byma",
       "priority": int(priority),
       "bull_regime_id": None,
+      "cycle_id": None,
+      "cycle_trade_no": None,
+      "cycle_status": "",
+      "cycle_trade_count": None,
+      "cycle_closed_trade_count": None,
+      "cycle_total_pnl_pct": None,
       "entry_fired_in_regime": None,
       "entry_blocked_in_regime": False,
       "open": round(float(row["open"]), 6),
@@ -218,9 +234,9 @@ class BymaBacktester:
       "bull_env_ready_state": bool(row["bull_env_ready_state"]),
       "bull_env_confirmed_state": bool(row["bull_env_confirmed_state"]),
       "external_trend_ok": bool(row["external_trend_ok"]),
-      "entry_ready_state_raw": bool(row["entry_ready_state_raw"]),
+      "initial_entry_ready_state": bool(row["initial_entry_ready_state"]),
+      "reentry_ready_state": bool(row["reentry_ready_state"]),
       "entry_ready_state": bool(row["entry_ready_state"]),
-      "entry_cross_up_state": bool(row["entry_cross_up_state"]),
       "weaken_state": bool(row["weaken_state"]),
       "exit_trend_state": bool(row["exit_trend_state"]),
       "stop_loss_state": bool(row["stop_loss_state"]),
@@ -254,135 +270,175 @@ class BymaBacktester:
       item.update(extra)
     self.trade_trace.append(item)
 
+  def _new_cycle(self, idx: int) -> Dict[str, Any]:
+    self._cycle_id_seq += 1
+    return {
+      "cycle_id": self._cycle_id_seq,
+      "symbol": self.symbol,
+      "timeframe": self.timeframe,
+      "structure_type": "byma",
+      "status": "ACTIVE",
+      "start_idx": int(idx),
+      "start_time": self._row_time(idx),
+      "end_idx": None,
+      "end_time": "",
+      "end_reason": "",
+      "entry_signal_count": 0,
+      "trade_count": 0,
+      "closed_trade_count": 0,
+      "win_trade_count": 0,
+      "loss_trade_count": 0,
+      "sum_trade_pnl_pct": 0.0,
+      "sum_trade_pnl_abs": 0.0,
+      "avg_trade_pnl_pct": 0.0,
+      "max_trade_win_pct": None,
+      "max_trade_loss_pct": None,
+      "open_trade_id": None,
+      "open_trade_count": 0,
+    }
+
+  def _close_cycle(self, cycle: Dict[str, Any], idx: int, reason: str):
+    cycle["status"] = "CLOSED"
+    cycle["end_idx"] = int(idx)
+    cycle["end_time"] = self._row_time(idx)
+    cycle["end_reason"] = reason
+    if cycle["closed_trade_count"] > 0:
+      cycle["avg_trade_pnl_pct"] = round(
+        float(cycle["sum_trade_pnl_pct"]) / float(cycle["closed_trade_count"]), 4
+      )
+    else:
+      cycle["avg_trade_pnl_pct"] = 0.0
+
+    cycle["sum_trade_pnl_pct"] = round(float(cycle["sum_trade_pnl_pct"]), 4)
+    cycle["sum_trade_pnl_abs"] = round(float(cycle["sum_trade_pnl_abs"]), 6)
+    if cycle["max_trade_win_pct"] is not None:
+      cycle["max_trade_win_pct"] = round(float(cycle["max_trade_win_pct"]), 4)
+    if cycle["max_trade_loss_pct"] is not None:
+      cycle["max_trade_loss_pct"] = round(float(cycle["max_trade_loss_pct"]), 4)
+
+    self.cycles.append(dict(cycle))
+
+  def _attach_trade_result_to_cycle(
+    self,
+    cycle: Dict[str, Any] | None,
+    trade: Dict[str, Any],
+  ):
+    if cycle is None:
+      return
+    pnl_pct = float(trade.get("pnl_pct") or 0.0)
+    pnl_abs = float(trade.get("pnl_abs") or 0.0)
+    cycle["closed_trade_count"] += 1
+    cycle["open_trade_count"] = max(0, int(cycle.get("open_trade_count", 0)) - 1)
+    cycle["open_trade_id"] = None
+    cycle["sum_trade_pnl_pct"] += pnl_pct
+    cycle["sum_trade_pnl_abs"] += pnl_abs
+    if pnl_abs > 0:
+      cycle["win_trade_count"] += 1
+    elif pnl_abs < 0:
+      cycle["loss_trade_count"] += 1
+
+    prev_max_win = cycle.get("max_trade_win_pct")
+    prev_max_loss = cycle.get("max_trade_loss_pct")
+    cycle["max_trade_win_pct"] = (
+      pnl_pct if prev_max_win is None else max(float(prev_max_win), pnl_pct)
+    )
+    cycle["max_trade_loss_pct"] = (
+      pnl_pct if prev_max_loss is None else min(float(prev_max_loss), pnl_pct)
+    )
+
   def run(self):
     in_position = False
     current_trade: Dict[str, Any] | None = None
 
     bull_regime_active = False
     bull_regime_id = 0
-    entry_fired_in_regime = False
     cooldown_until_idx = -1
 
     weaken_alert_armed = False
     stop_loss_armed = True
     exit_trend_armed = False
 
-    for i in range(1, len(self.df)):
-      prev = self.df.loc[i - 1]
+    current_cycle: Dict[str, Any] | None = None
+
+    for i in range(2, len(self.df)):
       cur = self.df.loc[i]
 
-      prev_bull_confirmed = bool(prev["bull_env_confirmed_state"])
       cur_bull_confirmed = bool(cur["bull_env_confirmed_state"])
-
-      cur_entry_cross_up = bool(cur["entry_cross_up_state"])
-      cur_entry_regime_first = bool(cur["entry_regime_first_state"])
+      cur_entry_ready = bool(cur["entry_ready_state"])
+      cur_initial_entry_ready = bool(cur["initial_entry_ready_state"])
+      cur_reentry_ready = bool(cur["reentry_ready_state"])
       cur_weaken = bool(cur["weaken_state"])
       cur_exit = bool(cur["exit_trend_state"])
       cur_stop = bool(cur["stop_loss_state"])
-
-      bull_cross_up = (not prev_bull_confirmed) and cur_bull_confirmed
-      bull_cross_down = prev_bull_confirmed and (not cur_bull_confirmed)
 
       can_open_new_regime = i > cooldown_until_idx
 
       if not cur_stop:
         stop_loss_armed = True
 
-      if bull_cross_up and (not bull_regime_active) and can_open_new_regime:
+      if (not bull_regime_active) and cur_bull_confirmed and can_open_new_regime:
         bull_regime_active = True
         bull_regime_id += 1
-        entry_fired_in_regime = False
 
         weaken_alert_armed = True
         exit_trend_armed = True
+
+        current_cycle = self._new_cycle(i)
 
         self._record_signal_event(
           event_type="BULL_ENV_READY",
           idx=i,
           reason=f"bull_env_confirmed_{self.bull_confirm_bars}_bars",
-          signal_text=f"多头环境：蓝梯子整体不弱于黄梯子，黄色梯子继续上行，且连续 {self.bull_confirm_bars} 根确认，进入做多观察区。",
+          signal_text=f"多头环境：蓝梯子整体不弱于黄梯子，黄色梯子继续上行，且连续 {self.bull_confirm_bars} 根确认，进入完整做多周期观察区。",
           priority=5,
           trade_id=(current_trade or {}).get("trade_id"),
           stop_price=cur["blue_lower"],
           extra={
             "bull_regime_id": bull_regime_id,
-            "entry_fired_in_regime": entry_fired_in_regime,
+            "cycle_id": current_cycle["cycle_id"] if current_cycle else None,
+            "cycle_trade_no": 0,
+            "cycle_status": current_cycle["status"] if current_cycle else "",
+            "cycle_trade_count": current_cycle["trade_count"] if current_cycle else 0,
+            "cycle_closed_trade_count": current_cycle["closed_trade_count"]
+            if current_cycle
+            else 0,
+            "cycle_total_pnl_pct": current_cycle["sum_trade_pnl_pct"]
+            if current_cycle
+            else 0.0,
+            "entry_fired_in_regime": False,
             "entry_blocked_in_regime": False,
             "cooldown_until_idx": cooldown_until_idx,
             "bull_confirm_bars": self.bull_confirm_bars,
             "regime_cooldown_bars": self.regime_cooldown_bars,
           },
         )
-        continue
-
-      if bull_cross_down and bull_regime_active:
-        bull_regime_active = False
-        entry_fired_in_regime = False
-        weaken_alert_armed = False
-        exit_trend_armed = False
-        cooldown_until_idx = i + self.regime_cooldown_bars
-
-      if cur_stop and stop_loss_armed and in_position:
-        self._record_signal_event(
-          event_type="LONG_STOP_LOSS",
-          idx=i,
-          reason="close_below_blue_and_ma55_60_65_first_armed",
-          signal_text="止损信号：收盘价跌破蓝梯子下边缘，且失守 MA55/60/65，短线结构明显恶化。",
-          priority=1,
-          trade_id=(current_trade or {}).get("trade_id"),
-          stop_price=cur["blue_lower"],
-          extra={
-            "bull_regime_id": current_trade.get("entry_regime_id")
-            if current_trade
-            else None,
-            "entry_fired_in_regime": entry_fired_in_regime,
-            "entry_blocked_in_regime": False,
-            "cooldown_until_idx": cooldown_until_idx,
-          },
-        )
-        stop_loss_armed = False
-
-        if current_trade is not None:
-          exit_price = float(cur["close"])
-          current_trade["exit_idx"] = int(i)
-          current_trade["exit_time"] = self._row_time(i)
-          current_trade["exit_price"] = round(exit_price, 6)
-          current_trade["exit_reason"] = "LONG_STOP_LOSS"
-          current_trade["holding_bars"] = int(i - current_trade["entry_idx"])
-          current_trade["pnl_abs"] = round(exit_price - current_trade["entry_price"], 6)
-          current_trade["pnl_pct"] = round(
-            (exit_price / current_trade["entry_price"] - 1.0) * 100.0, 4
-          )
-          self.trades.append(current_trade)
-
-          self._record_trade_trace(
-            action="CLOSE",
-            idx=i,
-            reason="LONG_STOP_LOSS",
-            trade_id=current_trade["trade_id"],
-            price=exit_price,
-            extra={
-              "entry_idx": current_trade["entry_idx"],
-              "entry_time": current_trade["entry_time"],
-              "bull_regime_id": current_trade.get("entry_regime_id"),
-            },
-          )
-          current_trade = None
-          in_position = False
-        continue
 
       if bull_regime_active and cur_exit and exit_trend_armed:
         self._record_signal_event(
           event_type="LONG_EXIT_TREND",
           idx=i,
-          reason="blue_below_yellow_first_in_regime",
-          signal_text="卖出信号：蓝梯子整体回落至黄色梯子下方，多头趋势结构失效。",
+          reason="blue_fully_below_yellow_and_close_below_yellow_lower",
+          signal_text="卖出信号：蓝色梯子完全死叉在黄色梯子下方，且收盘跌破黄色梯子下边缘，本轮完整做多周期结束。",
           priority=2,
           trade_id=(current_trade or {}).get("trade_id"),
           stop_price=cur["blue_lower"],
           extra={
             "bull_regime_id": bull_regime_id,
-            "entry_fired_in_regime": entry_fired_in_regime,
+            "cycle_id": current_cycle["cycle_id"] if current_cycle else None,
+            "cycle_trade_no": current_trade.get("cycle_trade_no")
+            if current_trade
+            else None,
+            "cycle_status": current_cycle["status"] if current_cycle else "",
+            "cycle_trade_count": current_cycle["trade_count"]
+            if current_cycle
+            else None,
+            "cycle_closed_trade_count": current_cycle["closed_trade_count"]
+            if current_cycle
+            else None,
+            "cycle_total_pnl_pct": round(float(current_cycle["sum_trade_pnl_pct"]), 4)
+            if current_cycle
+            else None,
+            "entry_fired_in_regime": None,
             "entry_blocked_in_regime": False,
             "cooldown_until_idx": cooldown_until_idx,
           },
@@ -403,6 +459,8 @@ class BymaBacktester:
           current_trade["pnl_pct"] = round(
             (exit_price / current_trade["entry_price"] - 1.0) * 100.0, 4
           )
+
+          self._attach_trade_result_to_cycle(current_cycle, current_trade)
           self.trades.append(current_trade)
 
           self._record_trade_trace(
@@ -415,6 +473,80 @@ class BymaBacktester:
               "entry_idx": current_trade["entry_idx"],
               "entry_time": current_trade["entry_time"],
               "bull_regime_id": current_trade.get("entry_regime_id"),
+              "cycle_id": current_trade.get("cycle_id"),
+              "cycle_trade_no": current_trade.get("cycle_trade_no"),
+            },
+          )
+          current_trade = None
+          in_position = False
+
+        if current_cycle is not None and current_cycle["status"] == "ACTIVE":
+          self._close_cycle(current_cycle, i, "LONG_EXIT_TREND")
+          current_cycle = None
+        continue
+
+      if cur_stop and stop_loss_armed and in_position:
+        cycle_id = current_trade.get("cycle_id") if current_trade else None
+        cycle_trade_no = current_trade.get("cycle_trade_no") if current_trade else None
+
+        self._record_signal_event(
+          event_type="LONG_STOP_LOSS",
+          idx=i,
+          reason="close_below_blue_and_ma55_60_65_first_armed",
+          signal_text="止损信号：收盘价跌破蓝梯子下边缘，且失守 MA55/60/65，当前持仓止损，但若完整周期未结束，后续仍允许再次买入。",
+          priority=1,
+          trade_id=(current_trade or {}).get("trade_id"),
+          stop_price=cur["blue_lower"],
+          extra={
+            "bull_regime_id": current_trade.get("entry_regime_id")
+            if current_trade
+            else None,
+            "cycle_id": cycle_id,
+            "cycle_trade_no": cycle_trade_no,
+            "cycle_status": current_cycle["status"] if current_cycle else "",
+            "cycle_trade_count": current_cycle["trade_count"]
+            if current_cycle
+            else None,
+            "cycle_closed_trade_count": current_cycle["closed_trade_count"]
+            if current_cycle
+            else None,
+            "cycle_total_pnl_pct": round(float(current_cycle["sum_trade_pnl_pct"]), 4)
+            if current_cycle
+            else None,
+            "entry_fired_in_regime": None,
+            "entry_blocked_in_regime": False,
+            "cooldown_until_idx": cooldown_until_idx,
+          },
+        )
+        stop_loss_armed = False
+
+        if current_trade is not None:
+          exit_price = float(cur["close"])
+          current_trade["exit_idx"] = int(i)
+          current_trade["exit_time"] = self._row_time(i)
+          current_trade["exit_price"] = round(exit_price, 6)
+          current_trade["exit_reason"] = "LONG_STOP_LOSS"
+          current_trade["holding_bars"] = int(i - current_trade["entry_idx"])
+          current_trade["pnl_abs"] = round(exit_price - current_trade["entry_price"], 6)
+          current_trade["pnl_pct"] = round(
+            (exit_price / current_trade["entry_price"] - 1.0) * 100.0, 4
+          )
+
+          self._attach_trade_result_to_cycle(current_cycle, current_trade)
+          self.trades.append(current_trade)
+
+          self._record_trade_trace(
+            action="CLOSE",
+            idx=i,
+            reason="LONG_STOP_LOSS",
+            trade_id=current_trade["trade_id"],
+            price=exit_price,
+            extra={
+              "entry_idx": current_trade["entry_idx"],
+              "entry_time": current_trade["entry_time"],
+              "bull_regime_id": current_trade.get("entry_regime_id"),
+              "cycle_id": current_trade.get("cycle_id"),
+              "cycle_trade_no": current_trade.get("cycle_trade_no"),
             },
           )
           current_trade = None
@@ -425,82 +557,123 @@ class BymaBacktester:
         self._record_signal_event(
           event_type="LONG_WEAKEN_ALERT",
           idx=i,
-          reason="close_below_blue_lower_first_in_regime",
-          signal_text="预警信号：收盘价首次跌破蓝梯子下边缘，短线节奏转弱，原建仓逻辑进入观察状态。",
+          reason="close_below_blue_lower_first_in_cycle",
+          signal_text="预警信号：收盘价跌破蓝梯子下边缘，短线转弱；若后续重新站回蓝梯子内部，完整周期内仍允许再次买入。",
           priority=3,
           trade_id=(current_trade or {}).get("trade_id"),
           stop_price=cur["blue_lower"],
           extra={
             "bull_regime_id": bull_regime_id,
-            "entry_fired_in_regime": entry_fired_in_regime,
+            "cycle_id": current_cycle["cycle_id"] if current_cycle else None,
+            "cycle_trade_no": current_trade.get("cycle_trade_no")
+            if current_trade
+            else None,
+            "cycle_status": current_cycle["status"] if current_cycle else "",
+            "cycle_trade_count": current_cycle["trade_count"]
+            if current_cycle
+            else None,
+            "cycle_closed_trade_count": current_cycle["closed_trade_count"]
+            if current_cycle
+            else None,
+            "cycle_total_pnl_pct": round(float(current_cycle["sum_trade_pnl_pct"]), 4)
+            if current_cycle
+            else None,
+            "entry_fired_in_regime": None,
             "entry_blocked_in_regime": False,
             "cooldown_until_idx": cooldown_until_idx,
           },
         )
         weaken_alert_armed = False
 
-      entry_first_in_regime = (
-        bull_regime_active and cur_entry_regime_first and (not entry_fired_in_regime)
-      )
+      if bull_regime_active and (not cur_weaken):
+        weaken_alert_armed = True
 
-      if entry_first_in_regime:
+      allow_new_entry = bull_regime_active and cur_entry_ready and (not in_position)
+
+      if allow_new_entry and self.allow_reentry:
+        if current_cycle is None:
+          current_cycle = self._new_cycle(i)
+
+        current_cycle["entry_signal_count"] += 1
+        current_cycle["trade_count"] += 1
+        current_cycle["open_trade_count"] += 1
+
+        cycle_trade_no = int(current_cycle["trade_count"])
+
+        if cur_reentry_ready:
+          entry_reason = "reenter_blue_band_after_2_closes_below_blue_lower"
+          signal_text = "重新买入信号：前 2 根 K 线收盘都在蓝梯子下边缘下方，当前收盘重新站回蓝梯子内部，完整周期内允许再次买入。"
+        else:
+          entry_reason = "initial_entry_ready_in_active_bull_cycle"
+          signal_text = f"买入信号：多头环境已连续{self.bull_confirm_bars}根确认，当前处于蓝梯子内部或上方，满足首次做多买点。"
+
         self._record_signal_event(
           event_type="LONG_ENTRY_READY",
           idx=i,
-          reason="entry_cross_up_first_in_confirmed_bull_regime",
-          signal_text=f"买入信号：蓝梯子穿出黄梯子，多头环境已连续{self.bull_confirm_bars}根确认，收盘在蓝梯子上方且高于MA55/60/65，本轮 bull regime 的首次买点。",
+          reason=entry_reason,
+          signal_text=signal_text,
           priority=4,
           stop_price=cur["blue_lower"],
           extra={
             "bull_regime_id": bull_regime_id,
+            "cycle_id": current_cycle["cycle_id"],
+            "cycle_trade_no": cycle_trade_no,
+            "cycle_status": current_cycle["status"],
+            "cycle_trade_count": current_cycle["trade_count"],
+            "cycle_closed_trade_count": current_cycle["closed_trade_count"],
+            "cycle_total_pnl_pct": round(float(current_cycle["sum_trade_pnl_pct"]), 4),
             "entry_fired_in_regime": True,
             "entry_blocked_in_regime": False,
             "cooldown_until_idx": cooldown_until_idx,
             "bull_confirm_bars": self.bull_confirm_bars,
             "regime_cooldown_bars": self.regime_cooldown_bars,
+            "is_reentry": bool(cur_reentry_ready),
           },
         )
 
-        entry_fired_in_regime = True
+        self._trade_id_seq += 1
+        entry_price = float(cur["close"])
+        current_trade = {
+          "trade_id": self._trade_id_seq,
+          "symbol": self.symbol,
+          "timeframe": self.timeframe,
+          "structure_type": "byma",
+          "direction": "LONG",
+          "entry_idx": int(i),
+          "entry_time": self._row_time(i),
+          "entry_price": round(entry_price, 6),
+          "entry_reason": "LONG_ENTRY_READY",
+          "entry_regime_id": bull_regime_id,
+          "cycle_id": current_cycle["cycle_id"],
+          "cycle_trade_no": cycle_trade_no,
+          "stop_price": round(float(cur["blue_lower"]), 6)
+          if pd.notna(cur["blue_lower"])
+          else None,
+          "exit_idx": None,
+          "exit_time": "",
+          "exit_price": None,
+          "exit_reason": "",
+          "holding_bars": None,
+          "pnl_abs": None,
+          "pnl_pct": None,
+        }
+        current_cycle["open_trade_id"] = current_trade["trade_id"]
+        in_position = True
 
-        if (not in_position) and self.allow_reentry:
-          self._trade_id_seq += 1
-          entry_price = float(cur["close"])
-          current_trade = {
-            "trade_id": self._trade_id_seq,
-            "symbol": self.symbol,
-            "timeframe": self.timeframe,
-            "structure_type": "byma",
-            "direction": "LONG",
-            "entry_idx": int(i),
-            "entry_time": self._row_time(i),
-            "entry_price": round(entry_price, 6),
-            "entry_reason": "LONG_ENTRY_READY",
-            "entry_regime_id": bull_regime_id,
-            "stop_price": round(float(cur["blue_lower"]), 6)
-            if pd.notna(cur["blue_lower"])
-            else None,
-            "exit_idx": None,
-            "exit_time": "",
-            "exit_price": None,
-            "exit_reason": "",
-            "holding_bars": None,
-            "pnl_abs": None,
-            "pnl_pct": None,
-          }
-          in_position = True
-
-          self._record_trade_trace(
-            action="OPEN",
-            idx=i,
-            reason="LONG_ENTRY_READY",
-            trade_id=current_trade["trade_id"],
-            price=entry_price,
-            extra={
-              "stop_price": current_trade["stop_price"],
-              "bull_regime_id": bull_regime_id,
-            },
-          )
+        self._record_trade_trace(
+          action="OPEN",
+          idx=i,
+          reason=entry_reason,
+          trade_id=current_trade["trade_id"],
+          price=entry_price,
+          extra={
+            "stop_price": current_trade["stop_price"],
+            "bull_regime_id": bull_regime_id,
+            "cycle_id": current_cycle["cycle_id"],
+            "cycle_trade_no": cycle_trade_no,
+            "is_reentry": bool(cur_reentry_ready),
+          },
+        )
 
     if (
       in_position
@@ -518,6 +691,8 @@ class BymaBacktester:
       current_trade["pnl_pct"] = round(
         (last_close / current_trade["entry_price"] - 1.0) * 100.0, 4
       )
+
+      self._attach_trade_result_to_cycle(current_cycle, current_trade)
       self.trades.append(current_trade)
 
       self._record_trade_trace(
@@ -530,8 +705,16 @@ class BymaBacktester:
           "entry_idx": current_trade["entry_idx"],
           "entry_time": current_trade["entry_time"],
           "bull_regime_id": current_trade.get("entry_regime_id"),
+          "cycle_id": current_trade.get("cycle_id"),
+          "cycle_trade_no": current_trade.get("cycle_trade_no"),
         },
       )
+      in_position = False
+      current_trade = None
+
+    if current_cycle is not None and current_cycle["status"] == "ACTIVE":
+      last_idx = len(self.df) - 1
+      self._close_cycle(current_cycle, last_idx, "DATA_END")
 
     return self.summary()
 
@@ -550,6 +733,8 @@ class BymaBacktester:
       "entry_price",
       "entry_reason",
       "entry_regime_id",
+      "cycle_id",
+      "cycle_trade_no",
       "stop_price",
       "exit_idx",
       "exit_time",
@@ -567,6 +752,39 @@ class BymaBacktester:
         tdf[c] = None
     return tdf[columns]
 
+  def cycles_df(self) -> pd.DataFrame:
+    columns = [
+      "cycle_id",
+      "symbol",
+      "timeframe",
+      "structure_type",
+      "status",
+      "start_idx",
+      "start_time",
+      "end_idx",
+      "end_time",
+      "end_reason",
+      "entry_signal_count",
+      "trade_count",
+      "closed_trade_count",
+      "win_trade_count",
+      "loss_trade_count",
+      "sum_trade_pnl_pct",
+      "sum_trade_pnl_abs",
+      "avg_trade_pnl_pct",
+      "max_trade_win_pct",
+      "max_trade_loss_pct",
+      "open_trade_id",
+      "open_trade_count",
+    ]
+    if not self.cycles:
+      return pd.DataFrame(columns=columns)
+    cdf = pd.DataFrame(self.cycles).copy()
+    for c in columns:
+      if c not in cdf.columns:
+        cdf[c] = None
+    return cdf[columns]
+
   def trade_trace_df(self) -> pd.DataFrame:
     if not self.trade_trace:
       return pd.DataFrame(
@@ -580,6 +798,8 @@ class BymaBacktester:
           "time",
           "price",
           "bull_regime_id",
+          "cycle_id",
+          "cycle_trade_no",
         ]
       )
     return pd.DataFrame(self.trade_trace)
@@ -591,9 +811,13 @@ class BymaBacktester:
 
   def summary(self) -> Dict[str, Any]:
     tdf = self.trades_df()
+    cdf = self.cycles_df()
     events_df = self.signal_events_df()
 
     if tdf.empty:
+      total_cycles = int(len(cdf))
+      completed_cycles = int((cdf["status"] == "CLOSED").sum()) if not cdf.empty else 0
+      open_cycles = int((cdf["status"] != "CLOSED").sum()) if not cdf.empty else 0
       return {
         "symbol": self.symbol,
         "timeframe": self.timeframe,
@@ -605,6 +829,12 @@ class BymaBacktester:
         "avg_holding_bars": 0.0,
         "max_win_pct": 0.0,
         "max_loss_pct": 0.0,
+        "total_cycles": total_cycles,
+        "completed_cycles": completed_cycles,
+        "open_cycles": open_cycles,
+        "cycle_win_rate_pct": 0.0,
+        "avg_cycle_pnl_pct": 0.0,
+        "total_cycle_pnl_pct": 0.0,
         "entry_signals": int((events_df["event_type"] == "LONG_ENTRY_READY").sum())
         if not events_df.empty
         else 0,
@@ -623,6 +853,21 @@ class BymaBacktester:
     if closed.empty:
       closed = tdf.copy()
 
+    closed_cycles = cdf.copy()
+    if not closed_cycles.empty:
+      closed_cycles = closed_cycles[closed_cycles["closed_trade_count"] > 0].copy()
+
+    cycle_win_rate_pct = 0.0
+    avg_cycle_pnl_pct = 0.0
+    total_cycle_pnl_pct = 0.0
+
+    if not closed_cycles.empty:
+      cycle_win_rate_pct = round(
+        (closed_cycles["sum_trade_pnl_abs"] > 0).mean() * 100.0, 4
+      )
+      avg_cycle_pnl_pct = round(float(closed_cycles["sum_trade_pnl_pct"].mean()), 4)
+      total_cycle_pnl_pct = round(float(closed_cycles["sum_trade_pnl_pct"].sum()), 4)
+
     return {
       "symbol": self.symbol,
       "timeframe": self.timeframe,
@@ -634,6 +879,14 @@ class BymaBacktester:
       "avg_holding_bars": round(float(closed["holding_bars"].mean()), 4),
       "max_win_pct": round(float(closed["pnl_pct"].max()), 4),
       "max_loss_pct": round(float(closed["pnl_pct"].min()), 4),
+      "total_cycles": int(len(cdf)),
+      "completed_cycles": int((cdf["status"] == "CLOSED").sum())
+      if not cdf.empty
+      else 0,
+      "open_cycles": int((cdf["status"] != "CLOSED").sum()) if not cdf.empty else 0,
+      "cycle_win_rate_pct": cycle_win_rate_pct,
+      "avg_cycle_pnl_pct": avg_cycle_pnl_pct,
+      "total_cycle_pnl_pct": total_cycle_pnl_pct,
       "entry_signals": int((events_df["event_type"] == "LONG_ENTRY_READY").sum())
       if not events_df.empty
       else 0,
