@@ -231,6 +231,13 @@ def _format_pct(v) -> str:
     return str(v)
 
 
+def _pick_first_existing_column(df: pd.DataFrame, candidates: List[str]) -> str | None:
+  for c in candidates:
+    if c in df.columns:
+      return c
+  return None
+
+
 def _ensure_event_columns(df: pd.DataFrame) -> pd.DataFrame:
   out = df.copy()
   if "symbol" not in out.columns:
@@ -272,8 +279,8 @@ def _ensure_event_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["entry_blocked_in_regime"] = False
 
   time_candidates = [
-    "event_time",
     "latest_event_time",
+    "event_time",
     "timestamp",
     "datetime",
     "dt",
@@ -753,6 +760,104 @@ def build_last_digest_by_symbol(
   return out
 
 
+def build_cycle_history_for_latest_cycle(
+  df: pd.DataFrame,
+  latest_only: bool = True,
+) -> pd.DataFrame:
+  cols = [
+    "symbol",
+    "timeframe",
+    "cycle_id",
+    "bull_regime_id",
+    "cycle_trade_no",
+    "cycle_status",
+    "latest_event_type",
+    "event_date",
+    "latest_event_time",
+    "latest_price",
+    "stop_price",
+    "signal_text",
+    "reason",
+    "cycle_trade_count",
+    "cycle_closed_trade_count",
+    "cycle_total_pnl_pct",
+    "readable_text",
+  ]
+
+  if df is None or df.empty:
+    return pd.DataFrame(columns=cols)
+
+  x = _ensure_event_columns(df).copy()
+
+  x = x[x["latest_event_type"].isin(READABLE_EVENT_TYPES)].copy()
+  if x.empty:
+    return pd.DataFrame(columns=cols)
+
+  x["event_date"] = x["event_date_str"].fillna("")
+  x["latest_event_time"] = x["event_time_str"].fillna("")
+  x["timeframe"] = x["timeframe"].map(_normalize_timeframe)
+
+  x = x.sort_values(
+    [
+      "symbol",
+      "timeframe",
+      "event_time_dt",
+      "bull_regime_id",
+      "cycle_id",
+      "cycle_trade_no",
+    ],
+    ascending=[True, True, True, True, True, True],
+    na_position="last",
+  ).reset_index(drop=True)
+
+  if "readable_text" not in x.columns:
+    x["readable_text"] = x.apply(
+      lambda r: (
+        f"{r.get('symbol', '')} | {_format_timeframe_label(r.get('timeframe', ''))} | "
+        f"{r.get('latest_event_time', '')} | {r.get('latest_event_type', '')} | {r.get('signal_text', '')}"
+      ),
+      axis=1,
+    )
+
+  picked = []
+
+  for (symbol, timeframe), grp in x.groupby(["symbol", "timeframe"], sort=True):
+    grp = grp.copy().sort_values(["event_time_dt"], ascending=[True])
+
+    valid_cycle = grp[grp["cycle_id"].notna()].copy()
+    if valid_cycle.empty:
+      if latest_only:
+        picked.append(grp.iloc[[-1]].copy())
+      else:
+        picked.append(grp.copy())
+      continue
+
+    latest_cycle_id = valid_cycle["cycle_id"].dropna().iloc[-1]
+    latest_cycle_grp = grp[grp["cycle_id"] == latest_cycle_id].copy()
+
+    if latest_only:
+      picked.append(latest_cycle_grp)
+    else:
+      picked.append(grp.copy())
+
+  if not picked:
+    return pd.DataFrame(columns=cols)
+
+  out = pd.concat(picked, ignore_index=True)
+
+  for c in cols:
+    if c not in out.columns:
+      out[c] = None
+
+  out = out.sort_values(
+    ["symbol", "timeframe", "event_date", "latest_event_time"],
+    ascending=[True, True, True, True],
+    na_position="last",
+  ).reset_index(drop=True)
+
+  return out[cols].copy()
+
+
 def load_price_data(
   csv_path: Path, start_time: str | None = None, end_time: str | None = None
 ) -> pd.DataFrame:
@@ -805,14 +910,16 @@ def main():
   final_summary_list = []
   market_signal_events = []
   market_signal_digest = []
+  market_cycle_history = []
 
   for symbol in all_symbols:
-    print(f"\\n{'=' * 40}\\n正在处理股票: {symbol}\\n{'=' * 40}")
+    print(f"\n{'=' * 40}\n正在处理股票: {symbol}\n{'=' * 40}")
 
     conf.symbol = symbol
     symbol_summary = []
     symbol_signal_events = []
     symbol_signal_digest = []
+    symbol_cycle_history = []
 
     for tf in conf.timeframes:
       if not tf.enabled:
@@ -892,6 +999,15 @@ def main():
           symbol_signal_events.append(signal_events_df)
           market_signal_events.append(signal_events_df)
 
+          tf_cycle_history_df = build_cycle_history_for_latest_cycle(signal_events_df)
+          if not tf_cycle_history_df.empty:
+            save_df(
+              tf_cycle_history_df,
+              out_dir / f"{symbol}_{tf.name}_cycle_history_latest_v8_byma.csv",
+            )
+            symbol_cycle_history.append(tf_cycle_history_df)
+            market_cycle_history.append(tf_cycle_history_df)
+
         if not signal_digest_df.empty:
           symbol_signal_digest.append(signal_digest_df)
           market_signal_digest.append(signal_digest_df)
@@ -941,6 +1057,13 @@ def main():
         out_dir / f"{symbol}_signal_digest_last_per_symbol_v8_byma.csv",
       )
 
+      symbol_cycle_history_df = build_cycle_history_for_latest_cycle(symbol_readable_df)
+      if not symbol_cycle_history_df.empty:
+        save_df(
+          symbol_cycle_history_df,
+          out_dir / f"{symbol}_cycle_history_latest_v8_byma.csv",
+        )
+
     if symbol_signal_digest:
       all_symbol_signal_digest_df = pd.concat(symbol_signal_digest, ignore_index=True)
       all_symbol_signal_digest_df = all_symbol_signal_digest_df.sort_values(
@@ -989,7 +1112,18 @@ def main():
     ).reset_index(drop=True)
     save_df(market_signal_digest_df, out_dir / "market_signal_digest_v8_byma.csv")
 
-  print("\\n" + "=" * 60)
+  if market_cycle_history:
+    market_cycle_history_df = pd.concat(market_cycle_history, ignore_index=True)
+    market_cycle_history_df = market_cycle_history_df.sort_values(
+      by=["symbol", "timeframe", "event_date", "latest_event_time"],
+      na_position="last",
+    ).reset_index(drop=True)
+    save_df(
+      market_cycle_history_df,
+      out_dir / "market_cycle_history_latest_v8_byma.csv",
+    )
+
+  print("\n" + "=" * 60)
   print("V8-BYMA 全市场回测完成")
   print(f"结果保存至: {out_dir}")
   print(f"新鲜度过滤 fresh_days = {conf.fresh_days}")
