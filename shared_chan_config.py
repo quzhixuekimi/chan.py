@@ -5,7 +5,7 @@ DEFAULT_CHAN_CONFIG: dict = {
   "skip_step": 0,
   "divergence_rate": float("inf"),
   "bsp2_follow_1": True,
-  "bsp3_follow_1": True,
+  "bsp3_follow_1": False,
   "strict_bsp3": False,
   "bsp3_peak": False,
   "bsp2s_follow_2": False,
