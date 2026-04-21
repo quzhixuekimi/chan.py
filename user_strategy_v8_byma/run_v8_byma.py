@@ -29,12 +29,6 @@ TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h"]
 
 SYMBOL_TIMEFRAME_WHITELIST: Dict[str, set[str]] = {}
 
-HIGHER_TF_FILTER_MAP: Dict[str, str] = {
-  "1h": "4h",
-  "2h": "1d",
-  "4h": "1d",
-}
-
 
 def save_df(df: pd.DataFrame, path: Path):
   path.parent.mkdir(parents=True, exist_ok=True)
@@ -797,47 +791,6 @@ def load_price_data(
   return df
 
 
-def compute_trend_filter_flags(df: pd.DataFrame) -> pd.DataFrame:
-  x = df.copy().reset_index(drop=True)
-  x["blue_upper"] = x["high"].ewm(span=24, adjust=False).mean()
-  x["blue_lower"] = x["low"].ewm(span=23, adjust=False).mean()
-  x["yellow_upper"] = x["high"].ewm(span=89, adjust=False).mean()
-  x["yellow_lower"] = x["low"].ewm(span=90, adjust=False).mean()
-
-  x["yellow_upper_prev"] = x["yellow_upper"].shift(1)
-  x["yellow_lower_prev"] = x["yellow_lower"].shift(1)
-  x["yellow_rising"] = (x["yellow_upper"] > x["yellow_upper_prev"]) & (
-    x["yellow_lower"] > x["yellow_lower_prev"]
-  )
-  x["blue_over_yellow"] = (x["blue_upper"] >= x["yellow_upper"]) & (
-    x["blue_lower"] >= x["yellow_lower"]
-  )
-  x["blue_below_yellow"] = (x["blue_upper"] < x["yellow_upper"]) & (
-    x["blue_lower"] < x["yellow_lower"]
-  )
-  x["bull_env_ready_state"] = x["blue_over_yellow"] & x["yellow_rising"]
-  x["exit_trend_state"] = x["blue_below_yellow"] & (x["close"] < x["yellow_lower"])
-  x["higher_tf_trend_ok"] = x["bull_env_ready_state"] & (~x["exit_trend_state"])
-  return x[["dt", "higher_tf_trend_ok"]].copy()
-
-
-def build_external_trend_ok_series(
-  cur_df: pd.DataFrame,
-  higher_df: pd.DataFrame | None,
-) -> pd.Series:
-  if higher_df is None or higher_df.empty:
-    return pd.Series([True] * len(cur_df))
-
-  high_flags = compute_trend_filter_flags(higher_df).sort_values("dt").copy()
-  merged = pd.merge_asof(
-    cur_df[["dt"]].sort_values("dt"),
-    high_flags,
-    on="dt",
-    direction="backward",
-  )
-  return merged["higher_tf_trend_ok"].fillna(False).astype(bool)
-
-
 def main():
   repo_root = Path(__file__).resolve().parent.parent
   conf = StrategyConfig()
@@ -854,14 +807,12 @@ def main():
   market_signal_digest = []
 
   for symbol in all_symbols:
-    print(f"\n{'=' * 40}\n正在处理股票: {symbol}\n{'=' * 40}")
+    print(f"\\n{'=' * 40}\\n正在处理股票: {symbol}\\n{'=' * 40}")
 
     conf.symbol = symbol
     symbol_summary = []
     symbol_signal_events = []
     symbol_signal_digest = []
-
-    price_cache: Dict[str, pd.DataFrame] = {}
 
     for tf in conf.timeframes:
       if not tf.enabled:
@@ -888,7 +839,6 @@ def main():
         price_df = load_price_data(
           csv_path, start_time=tf.start_time, end_time=tf.end_time
         )
-        price_cache[tf_name] = price_df.copy()
 
         if len(price_df) < conf.min_bars_required:
           print(
@@ -898,31 +848,6 @@ def main():
 
         bull_confirm_bars, regime_cooldown_bars = get_timeframe_params(tf.name)
 
-        higher_tf_name = HIGHER_TF_FILTER_MAP.get(tf_name)
-        higher_price_df = None
-        external_trend_ok = pd.Series([True] * len(price_df))
-        higher_tf_filter_name = ""
-
-        if higher_tf_name:
-          if higher_tf_name in price_cache:
-            higher_price_df = price_cache[higher_tf_name]
-          else:
-            if higher_tf_name == "1d":
-              higher_matches = sorted(data_dir.glob(f"{symbol}_*_1d.csv"))
-            else:
-              higher_matches = sorted(
-                data_dir.glob(f"{symbol}_*_yf_{higher_tf_name}_730d.csv")
-              )
-            if higher_matches:
-              higher_price_df = load_price_data(higher_matches[-1])
-              price_cache[higher_tf_name] = higher_price_df.copy()
-
-          if higher_price_df is not None and not higher_price_df.empty:
-            external_trend_ok = build_external_trend_ok_series(
-              cur_df=price_df, higher_df=higher_price_df
-            )
-            higher_tf_filter_name = higher_tf_name
-
         bt = BymaBacktester(
           symbol=symbol,
           timeframe=tf.name,
@@ -931,11 +856,10 @@ def main():
           close_open_positions_on_last_bar=conf.close_open_positions_on_last_bar,
           bull_confirm_bars=bull_confirm_bars,
           regime_cooldown_bars=regime_cooldown_bars,
-          external_trend_ok_series=external_trend_ok,
         )
 
         summary = bt.run()
-        summary["higher_tf_filter"] = higher_tf_filter_name
+        summary["higher_tf_filter"] = ""
         summary["whitelist_enabled"] = True
 
         signal_events_df = deduplicate_signal_events(bt.signal_events_df())
@@ -944,7 +868,7 @@ def main():
         indicators_df = bt.indicators_df().copy()
         indicators_df["bull_confirm_bars"] = bull_confirm_bars
         indicators_df["regime_cooldown_bars"] = regime_cooldown_bars
-        indicators_df["higher_tf_filter"] = higher_tf_filter_name
+        indicators_df["higher_tf_filter"] = ""
 
         save_df(indicators_df, out_dir / f"{symbol}_{tf.name}_ohlcv_v8_byma.csv")
         save_df(bt.trades_df(), out_dir / f"{symbol}_{tf.name}_trades_v8_byma.csv")
@@ -977,7 +901,7 @@ def main():
           f"{len(bt.cycles)} 个完整周期，"
           f"{len(signal_events_df)} 条信号事件，"
           f"{len(signal_digest_df)} 条信号摘要，"
-          f"params=(bull_confirm_bars={bull_confirm_bars}, cooldown={regime_cooldown_bars}, higher_tf_filter={higher_tf_filter_name or 'NONE'})"
+          f"params=(bull_confirm_bars={bull_confirm_bars}, cooldown={regime_cooldown_bars}, higher_tf_filter=NONE)"
         )
       except Exception as e:
         print(f" - [错误] 处理 {tf.name} 时发生异常: {e}")
@@ -1065,12 +989,12 @@ def main():
     ).reset_index(drop=True)
     save_df(market_signal_digest_df, out_dir / "market_signal_digest_v8_byma.csv")
 
-  print("\n" + "=" * 60)
+  print("\\n" + "=" * 60)
   print("V8-BYMA 全市场回测完成")
   print(f"结果保存至: {out_dir}")
   print(f"新鲜度过滤 fresh_days = {conf.fresh_days}")
   print(f"白名单: {SYMBOL_TIMEFRAME_WHITELIST}")
-  print(f"高周期过滤映射: {HIGHER_TF_FILTER_MAP}")
+  print("高周期过滤映射: NONE")
 
 
 if __name__ == "__main__":

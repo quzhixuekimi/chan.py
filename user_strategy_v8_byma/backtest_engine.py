@@ -16,7 +16,6 @@ class BymaBacktester:
     close_open_positions_on_last_bar: bool = True,
     bull_confirm_bars: int = 2,
     regime_cooldown_bars: int = 8,
-    external_trend_ok_series: pd.Series | None = None,
   ):
     self.symbol = symbol
     self.timeframe = timeframe
@@ -25,7 +24,6 @@ class BymaBacktester:
     self.close_open_positions_on_last_bar = close_open_positions_on_last_bar
     self.bull_confirm_bars = max(1, int(bull_confirm_bars))
     self.regime_cooldown_bars = max(0, int(regime_cooldown_bars))
-    self.external_trend_ok_series = external_trend_ok_series
 
     self.signal_events: List[Dict[str, Any]] = []
     self.trade_trace: List[Dict[str, Any]] = []
@@ -109,13 +107,7 @@ class BymaBacktester:
     )
     self.df["bull_env_confirmed_state"] = bull_confirm.fillna(False)
 
-    if self.external_trend_ok_series is None:
-      self.df["external_trend_ok"] = True
-    else:
-      ext = pd.Series(self.external_trend_ok_series).reset_index(drop=True)
-      if len(ext) != len(self.df):
-        raise ValueError("external_trend_ok_series length mismatch")
-      self.df["external_trend_ok"] = ext.fillna(False).astype(bool)
+    self.df["external_trend_ok"] = True
 
     self.df["close_prev_1"] = self.df["close"].shift(1)
     self.df["close_prev_2"] = self.df["close"].shift(2)
@@ -124,15 +116,13 @@ class BymaBacktester:
 
     self.df["initial_entry_ready_state"] = (
       self.df["bull_env_confirmed_state"]
-      & self.df["external_trend_ok"]
       & (self.df["in_blue_band"] | self.df["above_blue_upper"])
       & (self.df["close"] > self.df["blue_lower"])
       & self.df["above_ma55_60_65"]
     )
 
     self.df["reentry_ready_state"] = (
-      self.df["external_trend_ok"]
-      & (self.df["close"] > self.df["blue_lower"])
+      (self.df["close"] > self.df["blue_lower"])
       & (self.df["close_prev_1"] < self.df["blue_lower_prev_1"])
       & (self.df["close_prev_2"] < self.df["blue_lower_prev_2"])
     )
@@ -233,7 +223,7 @@ class BymaBacktester:
       "blue_below_yellow": bool(row["blue_below_yellow"]),
       "bull_env_ready_state": bool(row["bull_env_ready_state"]),
       "bull_env_confirmed_state": bool(row["bull_env_confirmed_state"]),
-      "external_trend_ok": bool(row["external_trend_ok"]),
+      "external_trend_ok": True,
       "initial_entry_ready_state": bool(row["initial_entry_ready_state"]),
       "reentry_ready_state": bool(row["reentry_ready_state"]),
       "entry_ready_state": bool(row["entry_ready_state"]),
