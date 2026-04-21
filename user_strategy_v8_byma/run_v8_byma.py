@@ -231,15 +231,9 @@ def _format_pct(v) -> str:
     return str(v)
 
 
-def _pick_first_existing_column(df: pd.DataFrame, candidates: List[str]) -> str | None:
-  for c in candidates:
-    if c in df.columns:
-      return c
-  return None
-
-
 def _ensure_event_columns(df: pd.DataFrame) -> pd.DataFrame:
   out = df.copy()
+
   if "symbol" not in out.columns:
     out["symbol"] = None
   if "timeframe" not in out.columns:
@@ -252,6 +246,7 @@ def _ensure_event_columns(df: pd.DataFrame) -> pd.DataFrame:
     out["stop_price"] = None
   if "event_count" not in out.columns:
     out["event_count"] = 1
+
   if "latest_price" not in out.columns:
     if "price" in out.columns:
       out["latest_price"] = out["price"]
@@ -259,8 +254,10 @@ def _ensure_event_columns(df: pd.DataFrame) -> pd.DataFrame:
       out["latest_price"] = out["close"]
     else:
       out["latest_price"] = None
+
   if "latest_event_type" not in out.columns:
     out["latest_event_type"] = out["event_type"] if "event_type" in out.columns else ""
+
   if "bull_regime_id" not in out.columns:
     out["bull_regime_id"] = None
   if "cycle_id" not in out.columns:
@@ -760,42 +757,57 @@ def build_last_digest_by_symbol(
   return out
 
 
-def build_cycle_history_for_latest_cycle(
-  df: pd.DataFrame,
-  latest_only: bool = True,
-) -> pd.DataFrame:
+def build_cycle_history_for_latest_cycle(df: pd.DataFrame) -> pd.DataFrame:
   cols = [
     "symbol",
     "timeframe",
-    "cycle_id",
-    "bull_regime_id",
-    "cycle_trade_no",
-    "cycle_status",
-    "latest_event_type",
     "event_date",
     "latest_event_time",
+    "latest_event_type",
     "latest_price",
     "stop_price",
-    "signal_text",
     "reason",
+    "signal_text",
+    "bull_regime_id",
+    "cycle_id",
+    "cycle_trade_no",
+    "cycle_status",
     "cycle_trade_count",
     "cycle_closed_trade_count",
     "cycle_total_pnl_pct",
+    "entry_blocked_in_regime",
+    "event_count",
     "readable_text",
   ]
-
   if df is None or df.empty:
     return pd.DataFrame(columns=cols)
 
-  x = _ensure_event_columns(df).copy()
+  x = _ensure_event_columns(df)
 
   x = x[x["latest_event_type"].isin(READABLE_EVENT_TYPES)].copy()
   if x.empty:
     return pd.DataFrame(columns=cols)
 
+  x["latest_event_time"] = x["event_time_raw"].fillna("")
   x["event_date"] = x["event_date_str"].fillna("")
-  x["latest_event_time"] = x["event_time_str"].fillna("")
-  x["timeframe"] = x["timeframe"].map(_normalize_timeframe)
+
+  def normalize_display_time(v: str) -> str:
+    if not v:
+      return ""
+    ts = pd.to_datetime(v, errors="coerce")
+    if pd.isna(ts):
+      return str(v)
+    return ts.strftime("%Y/%m/%d %H:%M")
+
+  x["latest_event_time"] = x["latest_event_time"].apply(normalize_display_time)
+
+  if "readable_text" not in x.columns:
+    x["readable_text"] = x.apply(
+      lambda r: (
+        f"{r['symbol']} | {_format_timeframe_label(r['timeframe'])} | {r['latest_event_time']} | {r['latest_event_type']} | {r['signal_text'] or ''}"
+      ),
+      axis=1,
+    )
 
   x = x.sort_values(
     [
@@ -810,41 +822,27 @@ def build_cycle_history_for_latest_cycle(
     na_position="last",
   ).reset_index(drop=True)
 
-  if "readable_text" not in x.columns:
-    x["readable_text"] = x.apply(
-      lambda r: (
-        f"{r.get('symbol', '')} | {_format_timeframe_label(r.get('timeframe', ''))} | "
-        f"{r.get('latest_event_time', '')} | {r.get('latest_event_type', '')} | {r.get('signal_text', '')}"
-      ),
-      axis=1,
-    )
-
-  picked = []
+  picked_rows = []
 
   for (symbol, timeframe), grp in x.groupby(["symbol", "timeframe"], sort=True):
-    grp = grp.copy().sort_values(["event_time_dt"], ascending=[True])
+    grp = grp.sort_values(["event_time_dt"], ascending=[True]).reset_index(drop=True)
 
-    valid_cycle = grp[grp["cycle_id"].notna()].copy()
-    if valid_cycle.empty:
-      if latest_only:
-        picked.append(grp.iloc[[-1]].copy())
-      else:
-        picked.append(grp.copy())
+    grp_cycle = grp[grp["cycle_id"].notna()].copy()
+    if grp_cycle.empty:
+      picked_rows.append(grp.iloc[-1].to_dict())
       continue
 
-    latest_cycle_id = valid_cycle["cycle_id"].dropna().iloc[-1]
+    latest_cycle_id = grp_cycle.iloc[-1]["cycle_id"]
     latest_cycle_grp = grp[grp["cycle_id"] == latest_cycle_id].copy()
+    latest_cycle_grp = latest_cycle_grp.sort_values(["event_time_dt"], ascending=[True])
 
-    if latest_only:
-      picked.append(latest_cycle_grp)
-    else:
-      picked.append(grp.copy())
+    for _, row in latest_cycle_grp.iterrows():
+      picked_rows.append(row.to_dict())
 
-  if not picked:
+  if not picked_rows:
     return pd.DataFrame(columns=cols)
 
-  out = pd.concat(picked, ignore_index=True)
-
+  out = pd.DataFrame(picked_rows)
   for c in cols:
     if c not in out.columns:
       out[c] = None
