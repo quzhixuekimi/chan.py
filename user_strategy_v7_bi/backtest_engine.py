@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import pandas as pd
 
 
@@ -70,6 +70,33 @@ class BiBacktester:
       else None,
       "idx": int(row["idx"]) if "idx" in row and pd.notna(row["idx"]) else idx,
     }
+
+  def _find_next_confirmed_down_bi(
+    self, current_bi_id: Any, current_end_index: int | None
+  ) -> Optional[Dict[str, Any]]:
+    for next_bi in self.bi_list:
+      if not next_bi.get("is_sure", True):
+        continue
+      if next_bi.get("direction") != "down":
+        continue
+
+      next_bi_id = next_bi.get("bi_id")
+      next_start_index = next_bi.get("start_index")
+      next_end_index = next_bi.get("end_index")
+
+      if current_bi_id is not None and next_bi_id is not None:
+        if next_bi_id > current_bi_id:
+          return next_bi
+
+      if current_end_index is not None and next_start_index is not None:
+        if next_start_index > current_end_index:
+          return next_bi
+
+      if current_end_index is not None and next_end_index is not None:
+        if next_end_index > current_end_index:
+          return next_bi
+
+    return None
 
   def _record_signal_event(
     self,
@@ -162,7 +189,6 @@ class BiBacktester:
         continue
 
       entry_idx = bi["start_index"] + self.entry_delay_bars
-      exit_idx = bi["end_index"] + self.exit_delay_bars
 
       if entry_idx >= len(self.df):
         self.trade_trace.append(
@@ -183,6 +209,32 @@ class BiBacktester:
         )
         continue
 
+      next_down_bi = self._find_next_confirmed_down_bi(
+        current_bi_id=bi.get("bi_id"),
+        current_end_index=bi.get("end_index"),
+      )
+
+      if next_down_bi is None:
+        self.trade_trace.append(
+          {
+            "timeframe": self.timeframe,
+            "bi_id": bi["bi_id"],
+            "action": "SKIP",
+            "reason": "next_confirmed_down_bi_not_found",
+          }
+        )
+        self._record_signal_event(
+          event_type="BI_SKIPPED",
+          bi=bi,
+          bar_index=bi.get("end_index"),
+          event_time=bi.get("end_time"),
+          reason="next_confirmed_down_bi_not_found",
+          signal_text="跳过：后续尚未出现确认向下笔，暂不生成正常卖出信号",
+        )
+        continue
+
+      exit_idx = next_down_bi["end_index"] + self.exit_delay_bars
+
       if exit_idx >= len(self.df):
         self.trade_trace.append(
           {
@@ -198,7 +250,14 @@ class BiBacktester:
           bar_index=exit_idx,
           event_time=self._get_row_time(exit_idx),
           reason="exit_idx_out_of_range",
-          signal_text="跳过：卖出触发位置超出K线范围",
+          signal_text="跳过：确认向下笔后的卖出触发位置超出K线范围",
+          extra={
+            "exit_bi_id": next_down_bi.get("bi_id"),
+            "exit_bi_direction": next_down_bi.get("direction"),
+            "exit_bi_end_index": next_down_bi.get("end_index"),
+            "exit_bi_end_time": next_down_bi.get("end_time"),
+            "exit_bi_end_price": next_down_bi.get("end_price"),
+          },
         )
         continue
 
@@ -217,7 +276,14 @@ class BiBacktester:
           bar_index=entry_idx,
           event_time=self._get_row_time(entry_idx),
           reason="exit_before_entry",
-          signal_text="跳过：卖出触发位置早于或等于买入位置",
+          signal_text="跳过：确认向下笔后的卖出触发位置早于或等于买入位置",
+          extra={
+            "exit_bi_id": next_down_bi.get("bi_id"),
+            "exit_bi_direction": next_down_bi.get("direction"),
+            "exit_bi_end_index": next_down_bi.get("end_index"),
+            "exit_bi_end_time": next_down_bi.get("end_time"),
+            "exit_bi_end_price": next_down_bi.get("end_price"),
+          },
         )
         continue
 
@@ -232,7 +298,7 @@ class BiBacktester:
 
       actual_exit_idx = exit_idx
       actual_exit_price = planned_exit_price
-      exit_reason = "up_bi_end_plus_delay_bars_close"
+      exit_reason = "confirmed_down_bi_end_plus_delay_bars_close"
 
       self.trade_trace.append(
         {
@@ -245,6 +311,10 @@ class BiBacktester:
           "stop_price": round(stop_price, 6),
           "planned_exit_idx": exit_idx,
           "planned_exit_time": planned_exit_time,
+          "exit_bi_id": next_down_bi.get("bi_id"),
+          "exit_bi_direction": next_down_bi.get("direction"),
+          "exit_bi_end_index": next_down_bi.get("end_index"),
+          "exit_bi_end_time": next_down_bi.get("end_time"),
         }
       )
 
@@ -260,6 +330,13 @@ class BiBacktester:
         trigger_price_ref="open",
         reason="up_bi_entry_delay_bars",
         signal_text=f"买入信号：向上笔起点后延迟 {self.entry_delay_bars} 根K线，以开盘价作为买入触发",
+        extra={
+          "exit_bi_id": next_down_bi.get("bi_id"),
+          "exit_bi_direction": next_down_bi.get("direction"),
+          "exit_bi_end_index": next_down_bi.get("end_index"),
+          "exit_bi_end_time": next_down_bi.get("end_time"),
+          "exit_bi_end_price": next_down_bi.get("end_price"),
+        },
       )
 
       self._record_signal_event(
@@ -274,6 +351,13 @@ class BiBacktester:
         trigger_price_ref="bi_start_price",
         reason="bi_structure_stop_initialized",
         signal_text="止损位设定：以当前笔起点价格作为结构止损位",
+        extra={
+          "exit_bi_id": next_down_bi.get("bi_id"),
+          "exit_bi_direction": next_down_bi.get("direction"),
+          "exit_bi_end_index": next_down_bi.get("end_index"),
+          "exit_bi_end_time": next_down_bi.get("end_time"),
+          "exit_bi_end_price": next_down_bi.get("end_price"),
+        },
       )
 
       stop_triggered = False
@@ -303,6 +387,13 @@ class BiBacktester:
               trigger_price_ref="low_break_stop_close_exit",
               reason="bi_structure_stop_break",
               signal_text="止损信号：后续K线最低价跌破结构止损位，按该K线收盘价退出",
+              extra={
+                "exit_bi_id": next_down_bi.get("bi_id"),
+                "exit_bi_direction": next_down_bi.get("direction"),
+                "exit_bi_end_index": next_down_bi.get("end_index"),
+                "exit_bi_end_time": next_down_bi.get("end_time"),
+                "exit_bi_end_price": next_down_bi.get("end_price"),
+              },
             )
             break
 
@@ -317,8 +408,15 @@ class BiBacktester:
           planned_exit_idx=exit_idx,
           planned_exit_time=planned_exit_time,
           trigger_price_ref="close",
-          reason="up_bi_end_plus_delay_bars_close",
-          signal_text=f"卖出信号：向上笔终点后延迟 {self.exit_delay_bars} 根K线，以收盘价作为卖出触发",
+          reason="confirmed_down_bi_end_plus_delay_bars_close",
+          signal_text=f"卖出信号：后续出现确认向下笔，并在其终点后延迟 {self.exit_delay_bars} 根K线，以收盘价作为卖出触发",
+          extra={
+            "exit_bi_id": next_down_bi.get("bi_id"),
+            "exit_bi_direction": next_down_bi.get("direction"),
+            "exit_bi_end_index": next_down_bi.get("end_index"),
+            "exit_bi_end_time": next_down_bi.get("end_time"),
+            "exit_bi_end_price": next_down_bi.get("end_price"),
+          },
         )
 
       exit_row = self._safe_row(actual_exit_idx)
@@ -358,6 +456,10 @@ class BiBacktester:
           "exit_time": exit_time,
           "exit_reason": exit_reason,
           "pnl_pct": round(pnl_pct, 4),
+          "exit_bi_id": next_down_bi.get("bi_id"),
+          "exit_bi_direction": next_down_bi.get("direction"),
+          "exit_bi_end_index": next_down_bi.get("end_index"),
+          "exit_bi_end_time": next_down_bi.get("end_time"),
         }
       )
 
@@ -383,6 +485,11 @@ class BiBacktester:
           "exit_price_actual": round(actual_exit_price, 6),
           "pnl_abs": round(pnl_abs, 6),
           "pnl_pct": round(pnl_pct, 4),
+          "exit_bi_id": next_down_bi.get("bi_id"),
+          "exit_bi_direction": next_down_bi.get("direction"),
+          "exit_bi_end_index": next_down_bi.get("end_index"),
+          "exit_bi_end_time": next_down_bi.get("end_time"),
+          "exit_bi_end_price": next_down_bi.get("end_price"),
         },
       )
 

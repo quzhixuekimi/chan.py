@@ -26,7 +26,20 @@ LevelType = Literal["1D", "4H", "2H", "1H"]
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = "/tmp/daily_workflow_scheduler.log"
 
-DEFAULT_SYMBOLS = ["AAPL", "TSLA", "NVDA"]
+DEFAULT_SYMBOLS = [
+  "QQQ",
+  "SPY",
+  "SOXL",
+  "AAPL",
+  "TSLA",
+  "NVDA",
+  "AMD",
+  "HOOD",
+  "COIN",
+  "PLTR",
+  "OKLO",
+  "IONQ",
+]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H"]
 
 
