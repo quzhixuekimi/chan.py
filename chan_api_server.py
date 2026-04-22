@@ -38,10 +38,9 @@ stream_handler.setFormatter(formatter)
 if not logger.handlers:
   logger.addHandler(file_handler)
   logger.addHandler(stream_handler)
-  logger.propagate = False
+logger.propagate = False
 
 LevelType = Literal["1D", "1H", "2H", "4H"]
-
 
 # =========================
 # Pydantic models
@@ -337,21 +336,86 @@ def fetch_60m_from_yfinance(code: str) -> pd.DataFrame:
   return df
 
 
-def aggregate_intraday(df_1h: pd.DataFrame, hours: int) -> pd.DataFrame:
+def _apply_intraday_bar_end_time(ts: pd.Timestamp, hours: int) -> pd.Timestamp:
+  dt = pd.Timestamp(ts)
+  base = dt.normalize()
+
+  hhmm = dt.strftime("%H:%M")
+
   if hours == 1:
-    return df_1h.copy()
-
-  df = df_1h.copy()
-  df["trade_date"] = df["time"].dt.date
-  df["hour"] = df["time"].dt.hour
-
-  # 针对美股小时K做简化分桶
-  if hours == 2:
-    df["bucket"] = (df["hour"] - 9) // 2
+    mapping = {
+      "09:30": "10:30",
+      "10:30": "11:30",
+      "11:30": "12:30",
+      "12:30": "13:30",
+      "13:30": "14:30",
+      "14:30": "15:30",
+      "15:30": "16:00",
+    }
+  elif hours == 2:
+    mapping = {
+      "09:30": "11:30",
+      "11:30": "13:30",
+      "13:30": "15:30",
+      "15:30": "16:00",
+    }
   elif hours == 4:
-    df["bucket"] = (df["hour"] - 9) // 4
+    mapping = {
+      "09:30": "13:30",
+      "13:30": "16:00",
+    }
+  else:
+    raise ValueError(f"unsupported hours: {hours}")
+
+  if hhmm not in mapping:
+    raise ValueError(f"unexpected intraday timestamp {hhmm} for {hours}H aggregation")
+
+  end_hhmm = mapping[hhmm]
+  end_hour, end_minute = map(int, end_hhmm.split(":"))
+  return base + pd.Timedelta(hours=end_hour, minutes=end_minute)
+
+
+def aggregate_intraday(df_1h: pd.DataFrame, hours: int) -> pd.DataFrame:
+  df = df_1h.copy()
+  df["time"] = pd.to_datetime(df["time"], errors="coerce")
+  df = df.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+
+  df["trade_date"] = df["time"].dt.date
+  df["hhmm"] = df["time"].dt.strftime("%H:%M")
+
+  if hours == 1:
+    allowed = ["09:30", "10:30", "11:30", "12:30", "13:30", "14:30", "15:30"]
+    df = df[df["hhmm"].isin(allowed)].copy()
+    df["bar_end_time"] = df["time"].apply(lambda x: _apply_intraday_bar_end_time(x, 1))
+    out = df[["bar_end_time", "open", "high", "low", "close", "volume"]].copy()
+    out = out.rename(columns={"bar_end_time": "time"})
+    return out.sort_values("time").reset_index(drop=True)
+
+  if hours == 2:
+    bucket_map = {
+      "09:30": 0,
+      "10:30": 0,
+      "11:30": 1,
+      "12:30": 1,
+      "13:30": 2,
+      "14:30": 2,
+      "15:30": 3,
+    }
+  elif hours == 4:
+    bucket_map = {
+      "09:30": 0,
+      "10:30": 0,
+      "11:30": 0,
+      "12:30": 0,
+      "13:30": 1,
+      "14:30": 1,
+      "15:30": 1,
+    }
   else:
     raise ValueError(f"unsupported aggregate hours: {hours}")
+
+  df = df[df["hhmm"].isin(bucket_map.keys())].copy()
+  df["bucket"] = df["hhmm"].map(bucket_map)
 
   agg = (
     df.groupby(["trade_date", "bucket"], sort=True)
@@ -368,6 +432,7 @@ def aggregate_intraday(df_1h: pd.DataFrame, hours: int) -> pd.DataFrame:
     .reset_index(drop=True)
   )
 
+  agg["time"] = agg["time"].apply(lambda x: _apply_intraday_bar_end_time(x, hours))
   return agg[["time", "open", "high", "low", "close", "volume"]]
 
 
@@ -419,8 +484,9 @@ def ensure_intraday_day_cache(code: str) -> dict[str, Path]:
   df_1h = fetch_60m_from_yfinance(code)
   df_2h = aggregate_intraday(df_1h, 2)
   df_4h = aggregate_intraday(df_1h, 4)
+  df_1h_shifted = aggregate_intraday(df_1h, 1)
 
-  _save_csv(df_1h, path_1h)
+  _save_csv(df_1h_shifted, path_1h)
   _save_csv(df_2h, path_2h)
   _save_csv(df_4h, path_4h)
 
@@ -449,43 +515,9 @@ def build_chan_from_csv(code: str, level: LevelType):
 
   from shared_chan_config import DEFAULT_CHAN_CONFIG
 
-  cfg = dict(DEFAULT_CHAN_CONFIG)  # 浅拷贝，避免污染原始字典
-  cfg["trigger_step"] = trigger_step  # trigger_step 是动态的，单独覆盖
+  cfg = dict(DEFAULT_CHAN_CONFIG)
+  cfg["trigger_step"] = trigger_step
   config = CChanConfig(cfg)
-
-  # config = CChanConfig(
-  #  {
-  #    "bi_algo": "normal",
-  #    "trigger_step": trigger_step,
-  #    "skip_step": 0,
-  #    "divergence_rate": float("inf"),
-  #    "bsp2_follow_1": True,
-  #    "bsp3_follow_1": True,
-  #    "strict_bsp3": False,
-  #    "bsp3_peak": False,
-  #    "bsp2s_follow_2": False,
-  #    "max_bs2_rate": 0.9999,
-  #    "macd_algo": "peak",
-  #    "bs1_peak": False,
-  #    "bs_type": "1,2,3a,3b",
-  #    "bsp1_only_multibi_zs": False,
-  #    "min_zs_cnt": 0,
-  #    "zs_algo": "over_seg",
-  #  }
-  # )
-
-  # 使用你确认能正常运行的配置
-  # config = CChanConfig(
-  #  {
-  #    "bs_type": "1,1p,2,2s,3a,3b",  # 全部开启
-  #    "bsp2_follow_1": True,
-  #    "bsp3_follow_1": True,
-  #    "strict_bsp3": False,  # 放宽三类买卖点
-  #    "bsp1_only_multibi_zs": False,  # 放宽一类买卖点
-  #    "bsp3_peak": False,
-  #    "min_zs_cnt": 0,  # 降低中枢数量要求
-  #  }
-  # )
 
   if level == "1D":
     kl_type = KL_TYPE.K_DAY
@@ -568,10 +600,10 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
   else:
     kl_list = chan.kl_datas[kl_type]
 
-    logger.info(f"[CHAN] kl_list type={type(kl_list)}")
-    logger.info(
-      f"[CHAN] kl_list attrs sample={sorted([x for x in dir(kl_list) if not x.startswith('_')])[:80]}"
-    )
+  logger.info(f"[CHAN] kl_list type={type(kl_list)}")
+  logger.info(
+    f"[CHAN] kl_list attrs sample={sorted([x for x in dir(kl_list) if not x.startswith('_')])[:80]}"
+  )
 
   ck_list = getattr(kl_list, "lst", []) or []
   logger.info(f"[CHAN] combined_kline_count={len(ck_list)}")
@@ -594,7 +626,7 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
       begin_klu = bi.get_begin_klu() if hasattr(bi, "get_begin_klu") else None
       end_klu = bi.get_end_klu() if hasattr(bi, "get_end_klu") else None
       logger.info(
-        f"  bi idx={getattr(bi, 'idx', None)} "
+        f" bi idx={getattr(bi, 'idx', None)} "
         f"dir={getattr(bi, 'dir', None)} "
         f"is_sure={getattr(bi, 'is_sure', None)} "
         f"begin={getattr(begin_klu, 'time', None)} "
@@ -605,7 +637,7 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
     logger.info("[CHAN] first 3 zs:")
     for i, zs in enumerate(zs_raw[:3]):
       logger.info(
-        f"  zs idx={i} "
+        f" zs idx={i} "
         f"begin_bi={getattr(getattr(zs, 'begin_bi', None), 'idx', None)} "
         f"end_bi={getattr(getattr(zs, 'end_bi', None), 'idx', None)} "
         f"low={getattr(zs, 'low', None)} "
@@ -633,7 +665,7 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
           volume=_safe_float(getattr(klu, "volume", None)),
         )
       )
-      # 提取 MACD 数据（框架已在 set_metric 阶段计算好）
+
       macd_obj = getattr(klu, "macd", None)
       if macd_obj is not None:
         dif = _safe_float(getattr(macd_obj, "DIF", None))
@@ -691,11 +723,13 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
     logger.info(
       f"[BSP] bs_point_lst_obj attrs={sorted([x for x in dir(bs_point_lst_obj) if not x.startswith('_')])}"
     )
+
     if hasattr(bs_point_lst_obj, "getSortedBspList"):
       try:
         bsp_raw_list = list(bs_point_lst_obj.getSortedBspList() or [])
       except Exception as e:
         logger.exception(f"getSortedBspList() failed: {e}")
+
     if not bsp_raw_list and hasattr(bs_point_lst_obj, "bsp_iter"):
       try:
         bsp_raw_list = list(bs_point_lst_obj.bsp_iter())
@@ -707,7 +741,8 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
         bsp_raw_list = list(bs_point_lst_obj.bsp_iter_v2())
       except Exception as e:
         logger.exception(f"bsp_iter_v2() failed: {e}")
-    logger.info(f"[BSP] Raw BSP count: {len(bsp_raw_list)}")
+
+  logger.info(f"[BSP] Raw BSP count: {len(bsp_raw_list)}")
 
   for i, bsp in enumerate(bsp_raw_list[:5]):
     logger.info(
@@ -752,13 +787,13 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
       )
     )
 
-    logger.info(
-      f"[SUMMARY] code={code.upper()} level={level} "
-      f"raw_kline_count={len(raw_kline_list)} "
-      f"bi_count={len(bi_list)} "
-      f"zs_count={len(zs_list)} "
-      f"bsp_count={len(bsp_list)}"
-    )
+  logger.info(
+    f"[SUMMARY] code={code.upper()} level={level} "
+    f"raw_kline_count={len(raw_kline_list)} "
+    f"bi_count={len(bi_list)} "
+    f"zs_count={len(zs_list)} "
+    f"bsp_count={len(bsp_list)}"
+  )
 
   return ChanAnalyzeData(
     symbol=code.upper(),
@@ -808,6 +843,7 @@ def analyze_chan(req: ChanAnalyzeRequest):
       message="ok",
       data=data,
     )
+
   except Exception as e:
     import traceback
 
