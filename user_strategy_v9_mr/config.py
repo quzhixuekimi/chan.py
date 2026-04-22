@@ -40,7 +40,7 @@ class StrategyConfig:
 
   volume_multiplier_entry: float = 1.2
   volume_multiplier_break: float = 1.5
-  fixed_stop_pct: float = 0.07
+  fixed_stop_pct: float = 0.03
 
   fresh_days: int = 2
   next_day_trigger: bool = True

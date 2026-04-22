@@ -266,25 +266,25 @@ class MRBacktester:
       stop_reason = ""
       stop_ref_price = None
 
-      if in_position:
-        cond_fixed = (
-          hard_stop_buffered_price is not None and close <= hard_stop_buffered_price
-        )
+      # if in_position:
+      #  cond_fixed = (
+      #    hard_stop_buffered_price is not None and close <= hard_stop_buffered_price
+      #  )
 
-        cond_swing_break = (
-          swing_stop_buffered_price is not None
-          and close <= swing_stop_buffered_price
-          and row.get("volume_breakdown", False)
-        )
+      #  cond_swing_break = (
+      #    swing_stop_buffered_price is not None
+      #    and close <= swing_stop_buffered_price
+      #    and row.get("volume_breakdown", False)
+      #  )
 
-        if cond_fixed:
-          stop_cond = True
-          stop_reason = "fixed_stop_7pct_with_buffer"
-          stop_ref_price = hard_stop_pct_price
-        elif cond_swing_break:
-          stop_cond = True
-          stop_reason = "break_recent_10d_low_with_volume_and_buffer"
-          stop_ref_price = recent_10d_low_prev
+      #  if cond_fixed:
+      #    stop_cond = True
+      #    stop_reason = "fixed_stop_3pct_with_buffer"
+      #    stop_ref_price = hard_stop_pct_price
+      #  elif cond_swing_break:
+      #    stop_cond = True
+      #    stop_reason = "break_recent_10d_low_with_volume_and_buffer"
+      #    stop_ref_price = recent_10d_low_prev
 
       if not in_position and entry_cond:
         if trigger_idx >= len(self.df):
@@ -295,12 +295,15 @@ class MRBacktester:
         )
 
         swing_stop = recent_10d_low_prev if pd.notna(recent_10d_low_prev) else None
-        pct_stop = next_open * (1.0 - self.fixed_stop_pct)
+        use_stop = (
+          float(swing_stop) if swing_stop is not None and pd.notna(swing_stop) else None
+        )
+        # pct_stop = next_open * (1.0 - self.fixed_stop_pct)
 
-        if swing_stop is not None and pd.notna(swing_stop):
-          use_stop = min(pct_stop, float(swing_stop))
-        else:
-          use_stop = pct_stop
+        # if swing_stop is not None and pd.notna(swing_stop):
+        #  use_stop = min(pct_stop, float(swing_stop))
+        # else:
+        #  use_stop = pct_stop
 
         trade_id += 1
         in_position = True
