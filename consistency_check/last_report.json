@@ -1,0 +1,141 @@
+{
+  "v6": {
+    "path": "/Users/kimi/Documents/workspaces/code/demo/chan.py/user_strategy_v6_bspzs/results",
+    "checks": [
+      {
+        "ok": true,
+        "failures": []
+      }
+    ]
+  },
+  "v7": {
+    "path": "/Users/kimi/Documents/workspaces/code/demo/chan.py/user_strategy_v7_bi/results",
+    "checks": [
+      {
+        "ok": true,
+        "failures": [],
+        "n_trades": 2743
+      }
+    ],
+    "snap_files": [
+      "HOOD_1d_bi_snapshot_v7_bi.csv",
+      "COIN_2h_bi_snapshot_v7_bi.csv",
+      "PLTR_2h_bi_snapshot_v7_bi.csv",
+      "HOOD_4h_bi_snapshot_v7_bi.csv",
+      "SOXL_1h_bi_snapshot_v7_bi.csv",
+      "SOXL_2h_bi_snapshot_v7_bi.csv",
+      "PLTR_1h_bi_snapshot_v7_bi.csv",
+      "OKLO_4h_bi_snapshot_v7_bi.csv",
+      "OKLO_1d_bi_snapshot_v7_bi.csv",
+      "COIN_1h_bi_snapshot_v7_bi.csv",
+      "OKLO_2h_bi_snapshot_v7_bi.csv",
+      "SOXL_4h_bi_snapshot_v7_bi.csv",
+      "HOOD_1h_bi_snapshot_v7_bi.csv",
+      "SOXL_1d_bi_snapshot_v7_bi.csv",
+      "COIN_4h_bi_snapshot_v7_bi.csv",
+      "PLTR_1d_bi_snapshot_v7_bi.csv",
+      "OKLO_1h_bi_snapshot_v7_bi.csv",
+      "HOOD_2h_bi_snapshot_v7_bi.csv",
+      "PLTR_4h_bi_snapshot_v7_bi.csv",
+      "COIN_1d_bi_snapshot_v7_bi.csv",
+      "AAPL_4h_bi_snapshot_v7_bi.csv",
+      "TSLA_4h_bi_snapshot_v7_bi.csv",
+      "SPY_1h_bi_snapshot_v7_bi.csv",
+      "IONQ_2h_bi_snapshot_v7_bi.csv",
+      "TSLA_1d_bi_snapshot_v7_bi.csv",
+      "QQQ_2h_bi_snapshot_v7_bi.csv",
+      "NVDA_2h_bi_snapshot_v7_bi.csv",
+      "AAPL_1d_bi_snapshot_v7_bi.csv",
+      "IONQ_1h_bi_snapshot_v7_bi.csv",
+      "AMD_1d_bi_snapshot_v7_bi.csv",
+      "NVDA_1h_bi_snapshot_v7_bi.csv",
+      "QQQ_1h_bi_snapshot_v7_bi.csv",
+      "AMD_4h_bi_snapshot_v7_bi.csv",
+      "SPY_2h_bi_snapshot_v7_bi.csv",
+      "SPY_1d_bi_snapshot_v7_bi.csv",
+      "TSLA_1h_bi_snapshot_v7_bi.csv",
+      "AMD_2h_bi_snapshot_v7_bi.csv",
+      "SPY_4h_bi_snapshot_v7_bi.csv",
+      "AAPL_1h_bi_snapshot_v7_bi.csv",
+      "IONQ_1d_bi_snapshot_v7_bi.csv",
+      "AMD_1h_bi_snapshot_v7_bi.csv",
+      "TSLA_2h_bi_snapshot_v7_bi.csv",
+      "NVDA_1d_bi_snapshot_v7_bi.csv",
+      "QQQ_1d_bi_snapshot_v7_bi.csv",
+      "AAPL_2h_bi_snapshot_v7_bi.csv",
+      "QQQ_4h_bi_snapshot_v7_bi.csv",
+      "NVDA_4h_bi_snapshot_v7_bi.csv",
+      "IONQ_4h_bi_snapshot_v7_bi.csv"
+    ],
+    "trade_files": [
+      "AAPL_1h_trades_v7_bi.csv",
+      "IONQ_2h_trades_v7_bi.csv",
+      "SOXL_1h_trades_v7_bi.csv",
+      "HOOD_2h_trades_v7_bi.csv",
+      "PLTR_1h_trades_v7_bi.csv",
+      "SPY_2h_trades_v7_bi.csv",
+      "AAPL_4h_trades_v7_bi.csv",
+      "SOXL_4h_trades_v7_bi.csv",
+      "AMD_2h_trades_v7_bi.csv",
+      "NVDA_2h_trades_v7_bi.csv",
+      "PLTR_4h_trades_v7_bi.csv",
+      "QQQ_2h_trades_v7_bi.csv",
+      "QQQ_4h_trades_v7_bi.csv",
+      "COIN_1d_trades_v7_bi.csv",
+      "QQQ_1h_trades_v7_bi.csv",
+      "AAPL_2h_trades_v7_bi.csv",
+      "TSLA_1d_trades_v7_bi.csv",
+      "SPY_4h_trades_v7_bi.csv",
+      "IONQ_1h_trades_v7_bi.csv",
+      "SOXL_2h_trades_v7_bi.csv",
+      "HOOD_1h_trades_v7_bi.csv",
+      "OKLO_1d_trades_v7_bi.csv",
+      "PLTR_2h_trades_v7_bi.csv",
+      "NVDA_4h_trades_v7_bi.csv",
+      "AMD_4h_trades_v7_bi.csv",
+      "SPY_1h_trades_v7_bi.csv",
+      "IONQ_4h_trades_v7_bi.csv",
+      "HOOD_4h_trades_v7_bi.csv",
+      "AMD_1h_trades_v7_bi.csv",
+      "NVDA_1h_trades_v7_bi.csv",
+      "AMD_1d_trades_v7_bi.csv",
+      "NVDA_1d_trades_v7_bi.csv",
+      "OKLO_4h_trades_v7_bi.csv",
+      "SPY_1d_trades_v7_bi.csv",
+      "TSLA_4h_trades_v7_bi.csv",
+      "HOOD_1d_trades_v7_bi.csv",
+      "OKLO_1h_trades_v7_bi.csv",
+      "TSLA_1h_trades_v7_bi.csv",
+      "IONQ_1d_trades_v7_bi.csv",
+      "QQQ_1d_trades_v7_bi.csv",
+      "COIN_1h_trades_v7_bi.csv",
+      "COIN_4h_trades_v7_bi.csv",
+      "COIN_2h_trades_v7_bi.csv",
+      "PLTR_1d_trades_v7_bi.csv",
+      "OKLO_2h_trades_v7_bi.csv",
+      "SOXL_1d_trades_v7_bi.csv",
+      "TSLA_2h_trades_v7_bi.csv",
+      "AAPL_1d_trades_v7_bi.csv"
+    ]
+  },
+  "v8": {
+    "path": "/Users/kimi/Documents/workspaces/code/demo/chan.py/user_strategy_v8_byma/results",
+    "checks": [
+      {
+        "ok": true,
+        "failures": [],
+        "n_trades": 1932
+      }
+    ]
+  },
+  "v9": {
+    "path": "/Users/kimi/Documents/workspaces/code/demo/chan.py/user_strategy_v9_mr/results",
+    "checks": [
+      {
+        "ok": true,
+        "failures": [],
+        "n_trades": 22
+      }
+    ]
+  }
+}
