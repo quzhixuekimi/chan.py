@@ -42,7 +42,7 @@ class StrategyConfig:
   volume_multiplier_break: float = 1.5
   fixed_stop_pct: float = 0.03
 
-  fresh_days: int = 2
+  fresh_days: int = 10
   next_day_trigger: bool = True
 
   def resolved_data_dir(self, repo_root: Path) -> Path:
