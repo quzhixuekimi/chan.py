@@ -4,7 +4,7 @@
 """
 
 __all__ = [
-    "exchange_interface",
-    "futu_adapter",
-    "paper_adapter",
+  "exchange_interface",
+  "futu_adapter",
+  "paper_adapter",
 ]

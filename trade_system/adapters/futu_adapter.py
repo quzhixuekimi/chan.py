@@ -8,18 +8,18 @@ from .exchange_interface import ExchangeAdapter
 
 
 class FutuAdapter(ExchangeAdapter):
-    def __init__(self, *args, **kwargs):
-        # 延迟导入 futu 库，避免导入时出错
-        pass
+  def __init__(self, *args, **kwargs):
+    # 延迟导入 futu 库，避免导入时出错
+    pass
 
-    def get_balance(self):
-        raise NotImplementedError
+  def get_balance(self):
+    raise NotImplementedError
 
-    def get_positions(self):
-        raise NotImplementedError
+  def get_positions(self):
+    raise NotImplementedError
 
-    def place_order(self, *args, **kwargs):
-        raise NotImplementedError
+  def place_order(self, *args, **kwargs):
+    raise NotImplementedError
 
-    def cancel_order(self, order_id: str):
-        raise NotImplementedError
+  def cancel_order(self, order_id: str):
+    raise NotImplementedError

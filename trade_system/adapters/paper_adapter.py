@@ -8,17 +8,17 @@ from .exchange_interface import ExchangeAdapter
 
 
 class PaperAdapter(ExchangeAdapter):
-    def __init__(self, initial_cash=100000):
-        self.initial_cash = initial_cash
+  def __init__(self, initial_cash=100000):
+    self.initial_cash = initial_cash
 
-    def get_balance(self):
-        raise NotImplementedError
+  def get_balance(self):
+    raise NotImplementedError
 
-    def get_positions(self):
-        raise NotImplementedError
+  def get_positions(self):
+    raise NotImplementedError
 
-    def place_order(self, *args, **kwargs):
-        raise NotImplementedError
+  def place_order(self, *args, **kwargs):
+    raise NotImplementedError
 
-    def cancel_order(self, order_id: str):
-        raise NotImplementedError
+  def cancel_order(self, order_id: str):
+    raise NotImplementedError

@@ -4,8 +4,8 @@
 """
 
 __all__ = [
-    "portfolio",
-    "position_manager",
-    "trade_logger",
-    "reporter",
+  "portfolio",
+  "position_manager",
+  "trade_logger",
+  "reporter",
 ]
