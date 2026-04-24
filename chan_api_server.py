@@ -241,15 +241,15 @@ def fetch_daily_from_akshare_or_yfinance(code: str) -> pd.DataFrame:
   2. Akshare 失败自动回退 yfinance
   """
   # Akshare first
-  try:
-    import akshare as ak
+  # try:
+  #  import akshare as ak
 
-    df = ak.stock_us_hist(symbol=code.upper(), period="daily", adjust="")
-    if df is not None and not df.empty:
-      logger.info(f"1D source=akshare code={code}")
-      return _normalize_columns(df)
-  except Exception as e:
-    logger.exception(f"Akshare daily failed for {code}: {e}")
+  #  df = ak.stock_us_hist(symbol=code.upper(), period="daily", adjust="")
+  #  if df is not None and not df.empty:
+  #    logger.info(f"1D source=akshare code={code}")
+  #    return _normalize_columns(df)
+  # except Exception as e:
+  #  logger.exception(f"Akshare daily failed for {code}: {e}")
 
   # yfinance fallback
   try:
