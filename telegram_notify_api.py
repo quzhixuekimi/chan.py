@@ -82,6 +82,7 @@ class TelegramDigestRequest(BaseModel):
   deduplicate: bool = Field(default=True, description="是否对已发送过的 digest 消息做去重")
   resend_existing: bool = Field(default=False, description="若为 true，则忽略去重状态，重新发送当前命中的消息")
   reset_sent_state_before_send: bool = Field(default=False, description="测试专用：发送前清空当前 strategy 的去重状态")
+  aggregate_mode: Optional[str] = Field(default=None, description="可选：byrule 或 bystock；若为 bystock 则 digest_file 应为聚合文件")
 
 
 def get_telegram_token() -> str:
@@ -153,6 +154,10 @@ def normalize_bool(v) -> bool:
 
 
 def is_empty_summary_row(row: dict) -> bool:
+  # If this is an aggregated-by-stock row, treat aggregated_summary_text as authoritative
+  if "aggregated_summary_text" in row:
+    agg = str(row.get("aggregated_summary_text", "") or "").strip()
+    return not bool(agg)
   has_signal = normalize_bool(row.get("has_signal", False))
   if has_signal:
     return False
@@ -197,10 +202,17 @@ def load_digest_rows(
     raise HTTPException(status_code=500, detail=f"failed to read digest csv: {e}")
   if df.empty:
     return []
-  if "summary_text" not in df.columns:
-    raise HTTPException(status_code=500, detail="digest csv missing required column: summary_text")
+  # Allow either legacy per-strategy CSVs (summary_text) or aggregated CSVs
+  if "summary_text" not in df.columns and "aggregated_summary_text" not in df.columns:
+    raise HTTPException(status_code=500, detail="digest csv missing required column: summary_text or aggregated_summary_text")
 
   rows = df.to_dict(orient="records")
+  # If this is an aggregated-by-stock CSV, normalize so that downstream
+  # code can treat 'summary_text' as present. Keep aggregated fields too.
+  if "aggregated_summary_text" in df.columns and "summary_text" not in df.columns:
+    for r in rows:
+      # ensure aggregated_summary_text is preserved and also available as summary_text
+      r["summary_text"] = str(r.get("aggregated_summary_text", "") or "").strip()
   filtered_rows: list[dict] = []
   whitelist_enabled = only_whitelist_event_types and not ignore_event_type_whitelist
 
@@ -309,7 +321,23 @@ def send_digest(req: TelegramDigestRequest):
   if not chat_id:
     raise HTTPException(status_code=400, detail="chat_id is required, either in request body or TELEGRAM_CHAT_ID env")
 
-  digest_path = resolve_digest_file(req.strategy_id, req.digest_file)
+  # support aggregate_mode=bystock: if provided and equals 'bystock', allow strategy_id 'bystock' and digest_file pointing to aggregated CSV
+  if (str(req.aggregate_mode or "").lower() == "bystock"):
+    if req.digest_file:
+      digest_path = Path(req.digest_file)
+      if not digest_path.is_absolute():
+        digest_path = BASE_DIR / digest_path
+    else:
+      # when aggregate_mode=bystock and no digest_file given, expect strategy_id to be 'bystock'
+      if str(req.strategy_id).strip().lower() == "bystock":
+        # try default aggregated location
+        agg_dir = BASE_DIR / "results" / "aggregated"
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        digest_path = agg_dir / f"market_aggregated_signal_digest_bystock_{today}.csv"
+      else:
+        raise HTTPException(status_code=400, detail="aggregate_mode=bystock requires digest_file or strategy_id='bystock'")
+  else:
+    digest_path = resolve_digest_file(req.strategy_id, req.digest_file)
 
   if req.reset_sent_state_before_send:
     clear_sent_state(req.strategy_id)
@@ -330,14 +358,24 @@ def send_digest(req: TelegramDigestRequest):
   filtered_rows: list[dict] = []
   new_state_items: dict = {}
 
+  # For bystock aggregated files the row contains aggregated_summary_text and aggregated_fingerprint
   for row in rows:
-    text = str(row.get("summary_text", "")).strip()
-    if text:
+    # support both per-strategy row.summary_text and aggregated file's aggregated_summary_text
+    if "aggregated_summary_text" in row:
+      text = str(row.get("aggregated_summary_text", "")).strip()
+      dedup_fingerprint = str(row.get("aggregated_fingerprint", "")).strip()
+      dedup_key = f"{row.get('symbol', '')}::{dedup_fingerprint}"
+    else:
+      text = str(row.get("summary_text", "")).strip()
+      dedup_key = build_row_dedup_key(row)
+
+    # add strategy id prefix for non-aggregated rows
+    if "aggregated_summary_text" not in row and text:
       text = f"[{req.strategy_id}]\n{text}"
+
     if not text:
       continue
 
-    dedup_key = build_row_dedup_key(row)
     already_sent = dedup_key in sent_items
 
     if req.deduplicate and (not req.resend_existing) and already_sent:

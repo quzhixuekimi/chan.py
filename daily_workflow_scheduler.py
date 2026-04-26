@@ -228,6 +228,7 @@ def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
       "resend_existing": config.notify_resend_existing,
       "limit": config.notify_limit,
       "dry_run": config.notify_dry_run,
+      "aggregate_mode": getattr(config, "notify_aggregate", None),
     }
 
     logger.info(
@@ -340,6 +341,29 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
   requested_strategies = (
     backtest_result.get("data", {}).get("requested_strategies", []) or []
   )
+
+  # If aggregation mode is bystock, run aggregation script to produce a per-symbol digest CSV
+  if getattr(config, "notify_aggregate", "byrule") == "bystock":
+    try:
+      import subprocess
+      script = Path(__file__).resolve().parent / "scripts" / "aggregate_signals.py"
+      today = datetime.utcnow().strftime("%Y/%m/%d")
+      out_dir = Path(__file__).resolve().parent / "results" / "aggregated"
+      out_dir.mkdir(parents=True, exist_ok=True)
+      cmd = ["python3", str(script), "--date", today, "--out", str(out_dir)]
+      logger.info("[AGGREGATE] running aggregation script: %s", " ".join(cmd))
+      subprocess.run(cmd, check=True)
+      agg_file = out_dir / f"market_aggregated_signal_digest_bystock_{today.replace('/', '-')}.csv"
+      if agg_file.exists():
+        config.notify_digest_file = str(agg_file)
+        requested_strategies = ["bystock"]
+        logger.info("[AGGREGATE] aggregated digest generated: %s", agg_file)
+      else:
+        logger.warning("[AGGREGATE] aggregated digest not found after script run: %s", agg_file)
+    except Exception as e:
+      logger.exception("[AGGREGATE] aggregation failed: %s", e)
+      # continue and let notify step handle absence gracefully
+
   notify_result = run_notify_step(config, requested_strategies)
 
   finished_at = _now_str(config.timezone)
@@ -495,10 +519,19 @@ def main() -> None:
   parser.add_argument(
     "--run-once", action="store_true", help="Run workflow immediately once and exit"
   )
+  parser.add_argument(
+    "--notify-aggregate",
+    choices=["byrule", "bystock"],
+    default="bystock",
+    help="Notify aggregation mode: byrule (per-strategy messages) or bystock (per-symbol aggregated messages). Default: bystock",
+  )
   args = parser.parse_args()
 
   config = build_config(args)
-  logger.info("[BOOT] config=%s", config)
+  config.notify_aggregate = args.notify_aggregate
+  if config.notify_aggregate == "bystock":
+    config.notify_only_has_signal = False
+  logger.info("[BOOT] config=%s notify_aggregate=%s", config, config.notify_aggregate)
 
   if args.run_once:
     result = run_daily_workflow(config)
