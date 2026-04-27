@@ -9,4 +9,5 @@ class Executor:
     self.adapter = adapter
 
   def execute(self, order):
-    raise NotImplementedError
+    """Execute an OrderRequest via the configured adapter and return OrderResponse."""
+    return self.adapter.place_order(order)
