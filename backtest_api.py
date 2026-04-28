@@ -32,6 +32,16 @@ class StrategyRegistryItem(BaseModel):
 
 
 STRATEGY_REGISTRY: dict[str, StrategyRegistryItem] = {
+  "v5_macdtd": StrategyRegistryItem(
+    strategy_id="v5_macdtd",
+    module="user_strategy_v5_macdtd.run_v5_macdtd",
+    description="V5 MACD+TD9 策略",
+    enabled=True,
+    allow_run_all=True,
+    timeout_seconds=1800,
+    output_dir="user_strategy_v5_macdtd/results",
+    market_summary_file="market_all_summary_v5_macdtd.csv",
+  ),
   "v6_bspzs": StrategyRegistryItem(
     strategy_id="v6_bspzs",
     module="user_strategy_v6_bspzs.run_v6_bspzs",

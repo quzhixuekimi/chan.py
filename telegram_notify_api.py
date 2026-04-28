@@ -17,6 +17,10 @@ from pydantic import BaseModel, Field
 BASE_DIR = Path(__file__).resolve().parent
 
 STRATEGY_DIGEST_REGISTRY = {
+  "v5_macdtd": {
+    "results_dir": BASE_DIR / "user_strategy_v5_macdtd" / "results",
+    "digest_file": "market_signal_digest_last_per_symbol_v5_macdtd.csv",
+  },
   "v6_bspzs": {
     "results_dir": BASE_DIR / "user_strategy_v6_bspzs" / "results",
     "digest_file": "market_trading_signal_digest_last_per_symbol_v6_bspzs.csv",
@@ -52,7 +56,9 @@ CURRENT_TELEGRAM_EVENT_WHITELIST = {
   "TRADE_CLOSED",
 }
 
-TELEGRAM_EVENT_WHITELIST = LEGACY_TELEGRAM_EVENT_WHITELIST | CURRENT_TELEGRAM_EVENT_WHITELIST
+TELEGRAM_EVENT_WHITELIST = (
+  LEGACY_TELEGRAM_EVENT_WHITELIST | CURRENT_TELEGRAM_EVENT_WHITELIST
+)
 
 SENT_STATE_DIR = BASE_DIR / "_telegram_sent_state"
 SENT_STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,27 +68,59 @@ app = FastAPI(title="Telegram Notify API", version="0.7.0")
 
 class TelegramTestRequest(BaseModel):
   text: str = Field(..., description="要发送的消息内容")
-  chat_id: Optional[str] = Field(default=None, description="可选，若不传则使用环境变量 TELEGRAM_CHAT_ID")
-  parse_mode: Optional[str] = Field(default=None, description="可选，支持 Markdown / HTML")
+  chat_id: Optional[str] = Field(
+    default=None, description="可选，若不传则使用环境变量 TELEGRAM_CHAT_ID"
+  )
+  parse_mode: Optional[str] = Field(
+    default=None, description="可选，支持 Markdown / HTML"
+  )
   disable_web_page_preview: bool = Field(default=True)
 
 
 class TelegramDigestRequest(BaseModel):
-  strategy_id: str = Field(default=DEFAULT_STRATEGY_ID, description="策略ID，例如 v7_bi / v8_byma")
-  digest_file: Optional[str] = Field(default=None, description="摘要CSV文件路径；若不传则按 strategy_id 使用默认 digest 文件")
-  chat_id: Optional[str] = Field(default=None, description="可选，若不传则使用环境变量 TELEGRAM_CHAT_ID")
-  only_has_signal: bool = Field(default=True, description="是否只发送 has_signal=True 的记录")
-  only_whitelist_event_types: bool = Field(default=True, description="是否只发送白名单事件类型，默认开启")
-  ignore_event_type_whitelist: bool = Field(default=False, description="测试专用：若为 true，则忽略事件类型白名单过滤")
-  include_empty_summary: bool = Field(default=False, description="是否包含全周期无信号的空摘要，默认不包含")
+  strategy_id: str = Field(
+    default=DEFAULT_STRATEGY_ID, description="策略ID，例如 v7_bi / v8_byma"
+  )
+  digest_file: Optional[str] = Field(
+    default=None,
+    description="摘要CSV文件路径；若不传则按 strategy_id 使用默认 digest 文件",
+  )
+  chat_id: Optional[str] = Field(
+    default=None, description="可选，若不传则使用环境变量 TELEGRAM_CHAT_ID"
+  )
+  only_has_signal: bool = Field(
+    default=True, description="是否只发送 has_signal=True 的记录"
+  )
+  only_whitelist_event_types: bool = Field(
+    default=True, description="是否只发送白名单事件类型，默认开启"
+  )
+  ignore_event_type_whitelist: bool = Field(
+    default=False, description="测试专用：若为 true，则忽略事件类型白名单过滤"
+  )
+  include_empty_summary: bool = Field(
+    default=False, description="是否包含全周期无信号的空摘要，默认不包含"
+  )
   limit: Optional[int] = Field(default=None, description="最多发送多少条，调试时可用")
-  dry_run: bool = Field(default=False, description="若为 true，只返回将要发送的内容，不真正调用 Telegram")
-  parse_mode: Optional[str] = Field(default=None, description="可选，支持 Markdown / HTML")
+  dry_run: bool = Field(
+    default=False, description="若为 true，只返回将要发送的内容，不真正调用 Telegram"
+  )
+  parse_mode: Optional[str] = Field(
+    default=None, description="可选，支持 Markdown / HTML"
+  )
   disable_web_page_preview: bool = Field(default=True)
-  deduplicate: bool = Field(default=True, description="是否对已发送过的 digest 消息做去重")
-  resend_existing: bool = Field(default=False, description="若为 true，则忽略去重状态，重新发送当前命中的消息")
-  reset_sent_state_before_send: bool = Field(default=False, description="测试专用：发送前清空当前 strategy 的去重状态")
-  aggregate_mode: Optional[str] = Field(default=None, description="可选：byrule 或 bystock；若为 bystock 则 digest_file 应为聚合文件")
+  deduplicate: bool = Field(
+    default=True, description="是否对已发送过的 digest 消息做去重"
+  )
+  resend_existing: bool = Field(
+    default=False, description="若为 true，则忽略去重状态，重新发送当前命中的消息"
+  )
+  reset_sent_state_before_send: bool = Field(
+    default=False, description="测试专用：发送前清空当前 strategy 的去重状态"
+  )
+  aggregate_mode: Optional[str] = Field(
+    default=None,
+    description="可选：byrule 或 bystock；若为 bystock 则 digest_file 应为聚合文件",
+  )
 
 
 def get_telegram_token() -> str:
@@ -108,14 +146,22 @@ def telegram_get_me() -> dict:
   url = telegram_api_url("getMe")
   resp = requests.get(url, timeout=20)
   if not resp.ok:
-    raise HTTPException(status_code=502, detail=f"Telegram getMe failed: status={resp.status_code}, body={resp.text[:1000]}")
+    raise HTTPException(
+      status_code=502,
+      detail=f"Telegram getMe failed: status={resp.status_code}, body={resp.text[:1000]}",
+    )
   data = resp.json()
   if not data.get("ok"):
     raise HTTPException(status_code=502, detail=f"Telegram getMe failed: {data}")
   return data
 
 
-def telegram_send_message(chat_id: str, text: str, parse_mode: Optional[str] = None, disable_web_page_preview: bool = True) -> dict:
+def telegram_send_message(
+  chat_id: str,
+  text: str,
+  parse_mode: Optional[str] = None,
+  disable_web_page_preview: bool = True,
+) -> dict:
   url = telegram_api_url("sendMessage")
   payload = {
     "chat_id": chat_id,
@@ -126,7 +172,10 @@ def telegram_send_message(chat_id: str, text: str, parse_mode: Optional[str] = N
     payload["parse_mode"] = parse_mode
   resp = requests.post(url, json=payload, timeout=20)
   if not resp.ok:
-    raise HTTPException(status_code=502, detail=f"Telegram sendMessage failed: status={resp.status_code}, body={resp.text[:1000]}")
+    raise HTTPException(
+      status_code=502,
+      detail=f"Telegram sendMessage failed: status={resp.status_code}, body={resp.text[:1000]}",
+    )
   data = resp.json()
   if not data.get("ok"):
     raise HTTPException(status_code=502, detail=f"Telegram sendMessage failed: {data}")
@@ -204,7 +253,10 @@ def load_digest_rows(
     return []
   # Allow either legacy per-strategy CSVs (summary_text) or aggregated CSVs
   if "summary_text" not in df.columns and "aggregated_summary_text" not in df.columns:
-    raise HTTPException(status_code=500, detail="digest csv missing required column: summary_text or aggregated_summary_text")
+    raise HTTPException(
+      status_code=500,
+      detail="digest csv missing required column: summary_text or aggregated_summary_text",
+    )
 
   rows = df.to_dict(orient="records")
   # If this is an aggregated-by-stock CSV, normalize so that downstream
@@ -273,7 +325,9 @@ def build_row_dedup_key(row: dict) -> str:
   summary_json = str(row.get("summary_json", "")).strip()
   event_type = str(row.get("event_type", "")).strip()
   event_time = str(row.get("event_time", "")).strip()
-  fingerprint = fingerprint_text(summary_text + "\n" + summary_json + "\n" + event_type + "\n" + event_time)
+  fingerprint = fingerprint_text(
+    summary_text + "\n" + summary_json + "\n" + event_type + "\n" + event_time
+  )
   return f"{symbol}::{fingerprint}"
 
 
@@ -285,7 +339,11 @@ def health():
     "service": "telegram-notify-api",
     "default_strategy_id": DEFAULT_STRATEGY_ID,
     "supported_strategies": sorted(STRATEGY_DIGEST_REGISTRY.keys()),
-    "default_digest_file": str((default_item.get("results_dir", BASE_DIR) / default_item.get("digest_file", "")).rstrip("/")),
+    "default_digest_file": str(
+      (
+        default_item.get("results_dir", BASE_DIR) / default_item.get("digest_file", "")
+      ).rstrip("/")
+    ),
     "telegram_event_whitelist": sorted(TELEGRAM_EVENT_WHITELIST),
     "legacy_event_whitelist": sorted(LEGACY_TELEGRAM_EVENT_WHITELIST),
     "current_event_whitelist": sorted(CURRENT_TELEGRAM_EVENT_WHITELIST),
@@ -303,8 +361,16 @@ def get_me():
 def send_test_message(req: TelegramTestRequest):
   chat_id = (req.chat_id or get_default_chat_id()).strip()
   if not chat_id:
-    raise HTTPException(status_code=400, detail="chat_id is required, either in request body or TELEGRAM_CHAT_ID env")
-  data = telegram_send_message(chat_id=chat_id, text=req.text, parse_mode=req.parse_mode, disable_web_page_preview=req.disable_web_page_preview)
+    raise HTTPException(
+      status_code=400,
+      detail="chat_id is required, either in request body or TELEGRAM_CHAT_ID env",
+    )
+  data = telegram_send_message(
+    chat_id=chat_id,
+    text=req.text,
+    parse_mode=req.parse_mode,
+    disable_web_page_preview=req.disable_web_page_preview,
+  )
   result = data.get("result", {})
   return {
     "ok": True,
@@ -319,10 +385,13 @@ def send_test_message(req: TelegramTestRequest):
 def send_digest(req: TelegramDigestRequest):
   chat_id = (req.chat_id or get_default_chat_id()).strip()
   if not chat_id:
-    raise HTTPException(status_code=400, detail="chat_id is required, either in request body or TELEGRAM_CHAT_ID env")
+    raise HTTPException(
+      status_code=400,
+      detail="chat_id is required, either in request body or TELEGRAM_CHAT_ID env",
+    )
 
   # support aggregate_mode=bystock: if provided and equals 'bystock', allow strategy_id 'bystock' and digest_file pointing to aggregated CSV
-  if (str(req.aggregate_mode or "").lower() == "bystock"):
+  if str(req.aggregate_mode or "").lower() == "bystock":
     if req.digest_file:
       digest_path = Path(req.digest_file)
       if not digest_path.is_absolute():
@@ -335,7 +404,10 @@ def send_digest(req: TelegramDigestRequest):
         today = datetime.utcnow().strftime("%Y-%m-%d")
         digest_path = agg_dir / f"market_aggregated_signal_digest_bystock_{today}.csv"
       else:
-        raise HTTPException(status_code=400, detail="aggregate_mode=bystock requires digest_file or strategy_id='bystock'")
+        raise HTTPException(
+          status_code=400,
+          detail="aggregate_mode=bystock requires digest_file or strategy_id='bystock'",
+        )
   else:
     digest_path = resolve_digest_file(req.strategy_id, req.digest_file)
 
@@ -437,7 +509,12 @@ def send_digest(req: TelegramDigestRequest):
   sent = []
   now_utc = datetime.utcnow().isoformat(timespec="seconds") + "Z"
   for row, msg in zip(filtered_rows, messages):
-    data = telegram_send_message(chat_id=chat_id, text=msg, parse_mode=req.parse_mode, disable_web_page_preview=req.disable_web_page_preview)
+    data = telegram_send_message(
+      chat_id=chat_id,
+      text=msg,
+      parse_mode=req.parse_mode,
+      disable_web_page_preview=req.disable_web_page_preview,
+    )
     result = data.get("result", {})
     sent.append(
       {
@@ -490,4 +567,5 @@ def send_digest(req: TelegramDigestRequest):
 
 if __name__ == "__main__":
   import uvicorn
+
   uvicorn.run("telegram_notify_api:app", host="127.0.0.1", port=8010, reload=True)
