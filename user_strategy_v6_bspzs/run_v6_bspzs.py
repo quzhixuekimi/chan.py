@@ -1361,6 +1361,40 @@ def main() -> None:
     )
     market_trading_digest_df = filter_trading_digest(market_last_digest_df)
 
+    # Normalize column headers to match v7 naming conventions (only rename headers,
+    # do not change any data or logic). This fixes inconsistencies like "summarytext" -> "summary_text"
+    def _normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
+      if df is None or df.empty:
+        return df
+      rename_map = {}
+      # simple renames
+      rename_map.update({
+        "signaldate": "signal_date",
+        "referencedate": "reference_date",
+        "freshdays": "fresh_days",
+        "summarytext": "summary_text",
+        "hassignal": "has_signal",
+        "hastradingsignal": "has_trading_signal",
+        "eventdate": "event_date",
+      })
+      # timeframe-specific renames: e.g. '1deventtype' -> '1d_event_type'
+      tfs = ["1d", "4h", "2h", "1h"]
+      for tf in tfs:
+        rename_map[f"{tf}eventtype"] = f"{tf}_event_type"
+        rename_map[f"{tf}signaltext"] = f"{tf}_signal_text"
+        rename_map[f"{tf}eventtime"] = f"{tf}_event_time"
+        rename_map[f"{tf}latestprice"] = f"{tf}_latest_price"
+
+      # apply only columns that exist
+      cols_present = {c for c in df.columns}
+      effective_map = {k: v for k, v in rename_map.items() if k in cols_present}
+      if effective_map:
+        df = df.rename(columns=effective_map)
+      return df
+
+    market_last_digest_df = _normalize_headers(market_last_digest_df)
+    market_trading_digest_df = _normalize_headers(market_trading_digest_df)
+
     save_df(market_readable_df, out_dir / "market_signal_events_readable_v6_bspzs.csv")
     save_df(
       market_last_df, out_dir / "market_signal_events_last_per_timeframe_v6_bspzs.csv"
