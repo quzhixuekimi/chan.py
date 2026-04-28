@@ -6,7 +6,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Literal
@@ -42,6 +42,8 @@ DEFAULT_SYMBOLS = [
 ]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H"]
 
+scheduler = None
+
 
 @dataclass
 class WorkflowConfig:
@@ -68,6 +70,9 @@ class WorkflowConfig:
   notify_limit: int | None = None
   notify_digest_file: str | None = None
   continue_on_notify_error: bool = True
+
+  retry_delay_hours: int = 2
+  retry_max_attempts: int = 3
 
 
 logger = logging.getLogger("daily_workflow_scheduler")
@@ -342,10 +347,10 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
     backtest_result.get("data", {}).get("requested_strategies", []) or []
   )
 
-  # If aggregation mode is bystock, run aggregation script to produce a per-symbol digest CSV
   if getattr(config, "notify_aggregate", "byrule") == "bystock":
     try:
       import subprocess
+
       script = Path(__file__).resolve().parent / "scripts" / "aggregate_signals.py"
       today = datetime.utcnow().strftime("%Y/%m/%d")
       out_dir = Path(__file__).resolve().parent / "results" / "aggregated"
@@ -353,16 +358,20 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
       cmd = ["python3", str(script), "--date", today, "--out", str(out_dir)]
       logger.info("[AGGREGATE] running aggregation script: %s", " ".join(cmd))
       subprocess.run(cmd, check=True)
-      agg_file = out_dir / f"market_aggregated_signal_digest_bystock_{today.replace('/', '-')}.csv"
+      agg_file = (
+        out_dir
+        / f"market_aggregated_signal_digest_bystock_{today.replace('/', '-')}.csv"
+      )
       if agg_file.exists():
         config.notify_digest_file = str(agg_file)
         requested_strategies = ["bystock"]
         logger.info("[AGGREGATE] aggregated digest generated: %s", agg_file)
       else:
-        logger.warning("[AGGREGATE] aggregated digest not found after script run: %s", agg_file)
+        logger.warning(
+          "[AGGREGATE] aggregated digest not found after script run: %s", agg_file
+        )
     except Exception as e:
       logger.exception("[AGGREGATE] aggregation failed: %s", e)
-      # continue and let notify step handle absence gracefully
 
   notify_result = run_notify_step(config, requested_strategies)
 
@@ -376,6 +385,104 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
     "notify": notify_result,
     "status": "ok",
   }
+
+
+def is_workflow_success(result: dict, config: WorkflowConfig) -> bool:
+  if not result:
+    return False
+
+  if result.get("status") != "ok":
+    return False
+
+  analyze = result.get("analyze") or {}
+  if analyze.get("success", 0) <= 0:
+    return False
+
+  if result.get("backtest") is None:
+    return False
+
+  notify = result.get("notify")
+  if config.notify_enabled and notify is not None and notify.get("ok") is False:
+    return False
+
+  return True
+
+
+def schedule_retry_job(config: WorkflowConfig, retry_count: int, reason: str) -> None:
+  global scheduler
+
+  if scheduler is None:
+    logger.error("[RETRY] scheduler is None, cannot schedule retry")
+    return
+
+  if retry_count >= config.retry_max_attempts:
+    logger.error(
+      "[RETRY] reached max retry attempts=%s, no more retries, reason=%s",
+      config.retry_max_attempts,
+      reason,
+    )
+    return
+
+  tz = ZoneInfo(config.timezone)
+  now = datetime.now(tz)
+  next_run = now + timedelta(hours=config.retry_delay_hours)
+
+  day_key = now.strftime("%Y%m%d")
+  next_retry = retry_count + 1
+  retry_job_id = f"chan_daily_workflow_retry_{day_key}_{next_retry}"
+
+  existing_job = scheduler.get_job(retry_job_id)
+  if existing_job is not None:
+    logger.warning(
+      "[RETRY] retry job already exists id=%s next_retry=%s reason=%s",
+      retry_job_id,
+      next_retry,
+      reason,
+    )
+    return
+
+  scheduler.add_job(
+    run_daily_workflow_with_retry,
+    trigger="date",
+    run_date=next_run,
+    args=[config, next_retry],
+    id=retry_job_id,
+    replace_existing=False,
+    coalesce=True,
+    max_instances=1,
+    misfire_grace_time=3600,
+  )
+
+  logger.warning(
+    "[RETRY] scheduled retry #%s at=%s reason=%s job_id=%s",
+    next_retry,
+    next_run.strftime("%Y-%m-%d %H:%M:%S %Z"),
+    reason,
+    retry_job_id,
+  )
+
+
+def run_daily_workflow_with_retry(config: WorkflowConfig, retry_count: int = 0) -> None:
+  logger.info("[RETRY] workflow entry retry_count=%s", retry_count)
+
+  try:
+    result = run_daily_workflow(config)
+  except Exception as e:
+    logger.exception("[RETRY] workflow exception retry_count=%s err=%s", retry_count, e)
+    schedule_retry_job(config, retry_count, f"exception: {e}")
+    return
+
+  if is_workflow_success(result, config):
+    logger.info("[RETRY] workflow success retry_count=%s, stop retry", retry_count)
+    return
+
+  reason = result.get("reason", "workflow result not successful")
+  logger.warning(
+    "[RETRY] workflow failed retry_count=%s reason=%s",
+    retry_count,
+    reason,
+  )
+  schedule_retry_job(config, retry_count, str(reason))
 
 
 def parse_symbols(value: str | None) -> list[str]:
@@ -419,10 +526,14 @@ def build_config(args: argparse.Namespace) -> WorkflowConfig:
     notify_limit=args.notify_limit,
     notify_digest_file=args.notify_digest_file,
     continue_on_notify_error=not args.stop_on_notify_error,
+    retry_delay_hours=args.retry_delay_hours,
+    retry_max_attempts=args.retry_max_attempts,
   )
 
 
 def main() -> None:
+  global scheduler
+
   parser = argparse.ArgumentParser(
     description="Daily workflow scheduler: analyze -> backtest -> notify"
   )
@@ -525,13 +636,33 @@ def main() -> None:
     default="bystock",
     help="Notify aggregation mode: byrule (per-strategy messages) or bystock (per-symbol aggregated messages). Default: bystock",
   )
+  parser.add_argument(
+    "--retry-delay-hours",
+    type=int,
+    default=2,
+    help="Retry delay hours after workflow failure. Default: 2",
+  )
+  parser.add_argument(
+    "--retry-max-attempts",
+    type=int,
+    default=3,
+    help="Max retry attempts after initial scheduled run failure. Default: 3",
+  )
+
   args = parser.parse_args()
 
   config = build_config(args)
   config.notify_aggregate = args.notify_aggregate
   if config.notify_aggregate == "bystock":
     config.notify_only_has_signal = False
-  logger.info("[BOOT] config=%s notify_aggregate=%s", config, config.notify_aggregate)
+
+  logger.info(
+    "[BOOT] config=%s notify_aggregate=%s retry_delay_hours=%s retry_max_attempts=%s",
+    config,
+    config.notify_aggregate,
+    config.retry_delay_hours,
+    config.retry_max_attempts,
+  )
 
   if args.run_once:
     result = run_daily_workflow(config)
@@ -545,22 +676,23 @@ def main() -> None:
 
   scheduler = BlockingScheduler(timezone=config.timezone)
   scheduler.add_job(
-    run_daily_workflow,
+    run_daily_workflow_with_retry,
     trigger=CronTrigger(
       day_of_week="tue-sat",
       hour=config.cron_hour,
       minute=config.cron_minute,
       timezone=config.timezone,
     ),
-    args=[config],
+    args=[config, 0],
     id="chan_daily_workflow",
     replace_existing=True,
     coalesce=True,
     max_instances=1,
+    misfire_grace_time=3600,
   )
 
   logger.info(
-    "[BOOT] scheduler started base_url=%s time=%02d:%02d timezone=%s symbols=%s levels=%s strategy_id=%s notify_enabled=%s notify_base_url=%s",
+    "[BOOT] scheduler started base_url=%s time=%02d:%02d timezone=%s symbols=%s levels=%s strategy_id=%s notify_enabled=%s notify_base_url=%s retry_delay_hours=%s retry_max_attempts=%s",
     config.base_url,
     config.cron_hour,
     config.cron_minute,
@@ -570,6 +702,8 @@ def main() -> None:
     config.backtest_strategy_id,
     config.notify_enabled,
     config.notify_base_url,
+    config.retry_delay_hours,
+    config.retry_max_attempts,
   )
   scheduler.start()
 
