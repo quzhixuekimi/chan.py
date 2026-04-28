@@ -127,6 +127,67 @@ def build_market_summary(all_trades: List[pd.DataFrame]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def build_market_all_summary(events_df: pd.DataFrame, trades_df: pd.DataFrame) -> pd.DataFrame:
+    """Build per-symbol × timeframe market summary similar to v7 format.
+
+    events_df: concatenated signal events across symbols/timeframes (must contain symbol,timeframe,event_type)
+    trades_df: concatenated trades across symbols/timeframes (may be empty)
+    """
+    if events_df is None or events_df.empty:
+        # If no events, fall back to empty DataFrame
+        return pd.DataFrame()
+
+    trades_combined = pd.DataFrame()
+    if trades_df is not None and not trades_df.empty:
+        trades_combined = trades_df.copy()
+
+    rows = []
+    symbols = sorted(events_df['symbol'].unique())
+    for symbol in symbols:
+        for tf in TIMEFRAMES:
+            tf_ev = events_df[(events_df['symbol'] == symbol) & (events_df['timeframe'] == tf)]
+            # count open signals as non-empty event_type
+            if not tf_ev.empty and 'event_type' in tf_ev.columns:
+                open_signals = int(tf_ev['event_type'].astype(str).str.strip().replace('nan', '').replace('None', '').apply(lambda x: 1 if x else 0).sum())
+            else:
+                open_signals = 0
+
+            # trades
+            total_trades = 0
+            wins = 0
+            avg_pnl = 0
+            if not trades_combined.empty:
+                tf_trades = trades_combined[(trades_combined['symbol'] == symbol) & (trades_combined['timeframe'] == tf)]
+                total_trades = len(tf_trades)
+                if total_trades > 0:
+                    if 'pnl_abs' in tf_trades.columns:
+                        wins = int((tf_trades['pnl_abs'].astype(float) > 0).sum())
+                    else:
+                        wins = 0
+                    if 'pnl_pct' in tf_trades.columns:
+                        try:
+                            avg_pnl = float(tf_trades['pnl_pct'].astype(float).mean())
+                        except Exception:
+                            avg_pnl = 0
+                    else:
+                        avg_pnl = 0
+
+            win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+
+            rows.append({
+                'symbol': symbol,
+                'timeframe': tf,
+                'total_trades': total_trades,
+                'open_signals': open_signals,
+                'win_rate_pct': round(win_rate, 4),
+                'avg_pnl_pct': round(avg_pnl, 4),
+                'entry_rule': 'macd_divergence_td9',
+                'exit_rule': 'td9_reverse_or_stop',
+            })
+
+    return pd.DataFrame(rows)
+
+
 import json
 
 def _safe_get_str(val) -> str:
@@ -423,12 +484,11 @@ def main():
             if not symbol_digest.empty:
                 save_df(symbol_digest, out_dir / f"{symbol}_signal_digest_last_per_symbol_v5_macdtd.csv")
 
-    # Market-wide summary
-    if all_trades:
-        market_summary = build_market_summary(all_trades)
-        if not market_summary.empty:
-            save_df(market_summary, out_dir / "market_all_summary_v5_macdtd.csv")
-            print(f"\nMarket summary: {len(market_summary)} rows")
+    # Market-wide summary (legacy aggregated ALL)
+    market_summary = build_market_summary(all_trades) if all_trades else pd.DataFrame()
+    if not market_summary.empty:
+        save_df(market_summary, out_dir / "market_all_summary_v5_macdtd.csv")
+        print(f"\nMarket summary: {len(market_summary)} rows")
     
     # Market digest (last event per timeframe per symbol)
     print(f"DEBUG all_events len={len(all_events)}, market_signal_events len={len(market_signal_events)}")
@@ -438,6 +498,50 @@ def main():
         if not market_digest.empty:
             save_df(market_digest, out_dir / "market_signal_digest_last_per_symbol_v5_macdtd.csv")
             print(f"Market digest: {len(market_digest)} rows")
+    # Build per-symbol×timeframe market_all_summary similar to v7
+    try:
+        print(f"DEBUG building market_all_summary from events ({len(market_signal_events)}) and trades ({len(all_trades)})")
+        events_concat = pd.concat(market_signal_events, ignore_index=True) if market_signal_events else pd.DataFrame()
+        trades_concat = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
+        # Fallbacks: try loading saved files from results directory if no in-memory events/trades
+        if events_concat.empty:
+            # 1) market_signal_digest_last_per_symbol
+            fallback_path = out_dir / "market_signal_digest_last_per_symbol_v5_macdtd.csv"
+            if fallback_path.exists():
+                try:
+                    events_concat = pd.read_csv(fallback_path)
+                    print(f"Loaded fallback events from {fallback_path}")
+                except Exception as e:
+                    print(f"Failed to read fallback events file: {e}")
+            # 2) individual per-symbol signal_events files
+            if events_concat.empty:
+                import glob
+                ev_files = list(out_dir.glob("*_signal_events_v5_macdtd.csv"))
+                if ev_files:
+                    try:
+                        parts = [pd.read_csv(p) for p in ev_files]
+                        events_concat = pd.concat(parts, ignore_index=True)
+                        print(f"Loaded {len(ev_files)} per-symbol event files")
+                    except Exception as e:
+                        print(f"Failed to concat per-symbol event files: {e}")
+
+        if trades_concat.empty:
+            # try loading trades files from results
+            tr_files = list(out_dir.glob("*_trades_v5_macdtd.csv"))
+            if tr_files:
+                try:
+                    parts = [pd.read_csv(p) for p in tr_files]
+                    trades_concat = pd.concat(parts, ignore_index=True)
+                    print(f"Loaded {len(tr_files)} per-symbol trade files")
+                except Exception as e:
+                    print(f"Failed to concat per-symbol trade files: {e}")
+
+        market_all = build_market_all_summary(events_concat, trades_concat)
+        if not market_all.empty:
+            save_df(market_all, out_dir / "market_all_summary_v5_macdtd.csv")
+            print(f"Market all summary: {len(market_all)} rows")
+    except Exception as e:
+        print(f"Failed to build market_all_summary: {e}")
     
     print(f"\nDone! Results in {out_dir}")
 
