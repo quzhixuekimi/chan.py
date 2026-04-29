@@ -64,6 +64,7 @@ def sha256_text(s: str) -> str:
 
 def write_agg_csv(path: Path, symbol: str, aggregated_summary_text: str):
   per_strategy = {
+    "v5_macdtd": "",
     "v6_bspzs": "",
     "v7_bi": "",
     "v8_byma": "",
@@ -180,7 +181,7 @@ def main():
 
   # 1) write initial file
   sym = "AAPL"
-  initial_text = "v6_bspzs : buy_1 | v7_bi :  | v8_byma :  | v9_mr : "
+  initial_text = "v5_macdtd : | v6_bspzs : buy_1 | v7_bi :  | v8_byma :  | v9_mr : "
   write_agg_csv(test_file, sym, initial_text)
 
   # ensure env vars so telegram_notify_api won't error when calling telegram_api_url
