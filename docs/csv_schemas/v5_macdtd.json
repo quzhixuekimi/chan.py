@@ -1,0 +1,186 @@
+{
+  "generated": true,
+  "strategy_name": "v5_macdtd",
+  "strategy_module": "user_strategy_v5_macdtd/",
+  "run_entry": "run_v5_macdtd.py",
+  "backtest_engine": "backtest_engine.py → BacktestEngine",
+  "description": "MACD背驰 + TD9 指标的量化交易策略，支持多时间框架(1d/4h/2h/1h)和多周期止盈",
+
+  "files": [
+    {
+      "filename_pattern": "{symbol}_{tf}_ohlcv_v5_macdtd.csv",
+      "description": "原始K线数据（策略处理后）",
+      "columns": [
+        {"name": "time", "type": "datetime", "description": "K线时间"},
+        {"name": "open", "type": "float", "description": "开盘价"},
+        {"name": "high", "type": "float", "description": "最高价"},
+        {"name": "low", "type": "float", "description": "最低价"},
+        {"name": "close", "type": "float", "description": "收盘价"},
+        {"name": "volume", "type": "float", "description": "成交量"},
+        {"name": "idx", "type": "int", "description": "索引"}
+      ],
+      "notes": "实际输出可能包含更多指标列（MACD/ATR/RSI/TD9），取决于prepare_indicators处理结果"
+    },
+    {
+      "filename_pattern": "{symbol}_{tf}_trades_v5_macdtd.csv",
+      "description": "成交记录（闭环交易）",
+      "columns": [
+        {"name": "trade_id", "type": "int", "description": "交易序号"},
+        {"name": "symbol", "type": "str", "description": "股票代码"},
+        {"name": "timeframe", "type": "str", "description": "时间框架(1d/4h/2h/1h)"},
+        {"name": "structure_type", "type": "str", "description": "结构类型(macd_td9)"},
+        {"name": "direction", "type": "str", "description": "方向(LONG/SHORT)"},
+        {"name": "entry_anchor_idx", "type": "int", "description": "入场锚点K线索引"},
+        {"name": "entry_anchor_time", "type": "datetime", "description": "入场锚点时间"},
+        {"name": "entry_anchor_price", "type": "float", "description": "入场锚点价格"},
+        {"name": "entry_idx", "type": "int", "description": "实际入场K线索引"},
+        {"name": "entry_time", "type": "datetime", "description": "实际入场时间"},
+        {"name": "entry_price", "type": "float", "description": "实际入场价格（含滑点）"},
+        {"name": "stop_price", "type": "float", "description": "止损价（ATR-based）"},
+        {"name": "exit_idx", "type": "int", "description": "出场K线索引"},
+        {"name": "exit_time", "type": "datetime", "description": "出场时间"},
+        {"name": "exit_price", "type": "float", "description": "出场价格（含滑点）"},
+        {"name": "exit_reason", "type": "str", "description": "出场原因(signal_close/tp/...)"},
+        {"name": "pnl_abs", "type": "float", "description": "绝对盈亏(USD)"},
+        {"name": "pnl_pct", "type": "float", "description": "百分比盈亏(%)"}
+      ]
+    },
+    {
+      "filename_pattern": "{symbol}_{tf}_signal_events_v5_macdtd.csv",
+      "description": "事件流（信号+交易事件）",
+      "columns": [
+        {"name": "event_seq", "type": "int", "description": "事件序号"},
+        {"name": "symbol", "type": "str", "description": "股票代码"},
+        {"name": "timeframe", "type": "str", "description": "时间框架"},
+        {"name": "event_type", "type": "str", "description": "事件类型(BUY_SIGNAL/ADD_POSITION/TAKE_PROFIT/SELL_SIGNAL/STOP_UPDATE)"},
+        {"name": "event_time", "type": "datetime", "description": "事件时间"},
+        {"name": "event_date", "type": "date", "description": "事件日期"},
+        {"name": "bar_index", "type": "int", "description": "K线索引"},
+        {"name": "price", "type": "float", "description": "事件价格"},
+        {"name": "stop_price", "type": "float", "description": "止损价"},
+        {"name": "planned_exit_idx", "type": "int", "description": "计划出场索引"},
+        {"name": "planned_exit_time", "type": "datetime", "description": "计划出场时间"},
+        {"name": "trigger_price_ref", "type": "float", "description": "触发价格参考"},
+        {"name": "reason", "type": "str", "description": "原因说明"},
+        {"name": "signal_text", "type": "str", "description": "信号文本描述"},
+        {"name": "summary_text", "type": "str", "description": "汇总文本"},
+        {"name": "trade_id", "type": "int", "description": "关联交易ID"},
+        {"name": "structure_type", "type": "str", "description": "结构类型"},
+        {"name": "bi_id", "type": "str", "description": "笔ID（兼容v7）"},
+        {"name": "bi_direction", "type": "str", "description": "笔方向（兼容v7）"}
+      ],
+      "notes": "事件类型: BUY_SIGNAL(开仓), ADD_POSITION(加仓), TAKE_PROFIT(止盈), SELL_SIGNAL(平仓), STOP_UPDATE(止损更新)"
+    },
+    {
+      "filename_pattern": "{symbol}_{tf}_signal_digest_v5_macdtd.csv",
+      "description": "每日信号摘要（单时间框架）",
+      "columns": [
+        {"name": "symbol", "type": "str", "description": "股票代码"},
+        {"name": "event_date", "type": "date", "description": "事件日期"},
+        {"name": "timeframe", "type": "str", "description": "时间框架"},
+        {"name": "latest_event_type", "type": "str", "description": "最新事件类型"},
+        {"name": "latest_event_time", "type": "datetime", "description": "最新事件时间"},
+        {"name": "latest_price", "type": "float", "description": "最新价格"},
+        {"name": "stop_price", "type": "float", "description": "止损价"},
+        {"name": "reason", "type": "str", "description": "原因"},
+        {"name": "signal_text", "type": "str", "description": "信号文本"},
+        {"name": "event_count", "type": "int", "description": "当日事件数"}
+      ]
+    },
+    {
+      "filename_pattern": "{symbol}_signal_digest_last_per_symbol_v5_macdtd.csv",
+      "description": "多时间框架汇总（symbol级，最后事件）",
+      "columns": [
+        {"name": "symbol", "type": "str", "description": "股票代码"},
+        {"name": "reference_date", "type": "date", "description": "参考日期"},
+        {"name": "signal_date", "type": "date", "description": "信号日期"},
+        {"name": "fresh_days", "type": "int", "description": "新鲜度天数"},
+        {"name": "1d_event_type", "type": "str", "description": "1d时间框架事件类型"},
+        {"name": "1d_signal_text", "type": "str", "description": "1d信号文本"},
+        {"name": "1d_event_time", "type": "datetime", "description": "1d事件时间"},
+        {"name": "1d_latest_price", "type": "float", "description": "1d最新价格"},
+        {"name": "1d_stop_price", "type": "float", "description": "1d止损价"},
+        {"name": "4h_event_type", "type": "str", "description": "4h时间框架事件类型"},
+        {"name": "4h_signal_text", "type": "str", "description": "4h信号文本"},
+        {"name": "4h_event_time", "type": "datetime", "description": "4h事件时间"},
+        {"name": "4h_latest_price", "type": "float", "description": "4h最新价格"},
+        {"name": "4h_stop_price", "type": "float", "description": "4h止损价"},
+        {"name": "2h_event_type", "type": "str", "description": "2h时间框架事件类型"},
+        {"name": "2h_signal_text", "type": "str", "description": "2h信号文本"},
+        {"name": "2h_event_time", "type": "datetime", "description": "2h事件时间"},
+        {"name": "2h_latest_price", "type": "float", "description": "2h最新价格"},
+        {"name": "2h_stop_price", "type": "float", "description": "2h止损价"},
+        {"name": "1h_event_type", "type": "str", "description": "1h时间框架事件类型"},
+        {"name": "1h_signal_text", "type": "str", "description": "1h信号文本"},
+        {"name": "1h_event_time", "type": "datetime", "description": "1h事件时间"},
+        {"name": "1h_latest_price", "type": "float", "description": "1h最新价格"},
+        {"name": "1h_stop_price", "type": "float", "description": "1h止损价"},
+        {"name": "has_signal", "type": "bool", "description": "是否有信号"},
+        {"name": "summary_text", "type": "str", "description": "汇总文本"}
+      ]
+    },
+    {
+      "filename_pattern": "market_all_summary_v5_macdtd.csv",
+      "description": "市场汇总（symbol × timeframe 统计）",
+      "columns": [
+        {"name": "symbol", "type": "str", "description": "股票代码"},
+        {"name": "timeframe", "type": "str", "description": "时间框架"},
+        {"name": "total_trades", "type": "int", "description": "总交易次数"},
+        {"name": "open_signals", "type": "int", "description": "开放信号数"},
+        {"name": "win_rate_pct", "type": "float", "description": "胜率(%)"},
+        {"name": "avg_pnl_pct", "type": "float", "description": "平均盈亏(%)"},
+        {"name": "entry_rule", "type": "str", "description": "入场规则"},
+        {"name": "exit_rule", "type": "str", "description": "出场规则"}
+      ]
+    },
+    {
+      "filename_pattern": "market_signal_digest_last_per_symbol_v5_macdtd.csv",
+      "description": "市场信号摘要（所有symbol最后事件）",
+      "columns": [
+        {"name": "symbol", "type": "str", "description": "股票代码"},
+        {"name": "reference_date", "type": "date", "description": "参考日期"},
+        {"name": "signal_date", "type": "date", "description": "信号日期"},
+        {"name": "fresh_days", "type": "int", "description": "新鲜度天数"},
+        {"name": "1d_event_type", "type": "str", "description": "1d事件类型"},
+        {"name": "1d_signal_text", "type": "str", "description": "1d信号"},
+        {"name": "1d_event_time", "type": "datetime", "description": "1d时间"},
+        {"name": "1d_latest_price", "type": "float", "description": "1d价格"},
+        {"name": "1d_stop_price", "type": "float", "description": "1d止损"},
+        {"name": "4h_event_type", "type": "str", "description": "4h事件类型"},
+        {"name": "4h_signal_text", "type": "str", "description": "4h信号"},
+        {"name": "4h_event_time", "type": "datetime", "description": "4h时间"},
+        {"name": "4h_latest_price", "type": "float", "description": "4h价格"},
+        {"name": "4h_stop_price", "type": "float", "description": "4h止损"},
+        {"name": "2h_event_type", "type": "str", "description": "2h事件类型"},
+        {"name": "2h_signal_text", "type": "str", "description": "2h信号"},
+        {"name": "2h_event_time", "type": "datetime", "description": "2h时间"},
+        {"name": "2h_latest_price", "type": "float", "description": "2h价格"},
+        {"name": "2h_stop_price", "type": "float", "description": "2h止损"},
+        {"name": "1h_event_type", "type": "str", "description": "1h事件类型"},
+        {"name": "1h_signal_text", "type": "str", "description": "1h信号"},
+        {"name": "1h_event_time", "type": "datetime", "description": "1h时间"},
+        {"name": "1h_latest_price", "type": "float", "description": "1h价格"},
+        {"name": "1h_stop_price", "type": "float", "description": "1h止损"},
+        {"name": "has_signal", "type": "bool", "description": "是否有信号"},
+        {"name": "summary_text", "type": "str", "description": "汇总文本"},
+        {"name": "summary_json", "type": "str", "description": "JSON格式摘要"}
+      ]
+    }
+  ],
+
+  "parameters": {
+    "risk_per_trade": {"default": 0.02, "description": "单笔风险比例"},
+    "min_divergence_strength": {"default": 0.25, "description": "最小背驰强度阈值"},
+    "enable_buy_filter": {"default": True, "description": "启用RSI买入过滤"},
+    "buy_rsi_threshold": {"default": 40, "description": "买入RSI阈值"},
+    "initial_add_size": {"default": 0.3, "description": "初始加仓比例(30%)"},
+    "trailing_stop_atr": {"default": 2.0, "description": "ATR移动止损倍数"},
+    "trailing_stop_pct": {"default": 0.05, "description": "百分比移动止损(5%)"},
+    "tp_ratios": {"default": {"1min": 0.25, "3min": 0.20, "5min": 0.25}, "description": "分时止盈比例"},
+    "tp_thresholds": {"default": [0.01, 0.03, 0.05], "description": "分阶段止盈阈值(1%/3%/5%)"}
+  },
+
+  "dynamic_columns": {
+    "notes": "OHLCV文件可能包含由indicators.py计算的额外列，如macd_line/macd_signal/macd_hist/atr/rsi/td_setup_9等"
+  }
+}

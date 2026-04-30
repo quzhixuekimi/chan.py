@@ -1,0 +1,45 @@
+{
+  "strategy": "v7_bi",
+  "files": [
+    {
+      "pattern": "{symbol}_{tf}_ohlcv_v7_bi.csv",
+      "columns": ["idx", "time", "open", "high", "low", "close", "volume"]
+    },
+    {
+      "pattern": "{symbol}_{tf}_bi_snapshot_v7_bi.csv",
+      "columns": [
+        "bi_id", "start_index", "end_index", "start_time", "end_time", "start_price", "end_price", "direction", "is_sure", "bars"
+      ],
+      "notes": "bi_list rows may contain additional fields from CChan; CSV includes union of keys."
+    },
+    {
+      "pattern": "{symbol}_{tf}_trades_v7_bi.csv",
+      "columns": [
+        "trade_id", "symbol", "timeframe", "structure_type", "direction",
+        "entry_anchor_idx", "entry_anchor_time", "entry_anchor_price",
+        "entry_idx", "entry_time", "entry_price", "stop_price",
+        "exit_idx", "exit_time", "exit_price", "exit_reason", "pnl_abs", "pnl_pct"
+      ]
+    },
+    {
+      "pattern": "{symbol}_{tf}_trade_trace_v7_bi.csv",
+      "columns": [
+        "timeframe", "bi_id", "bi_direction", "action", "reason", "entry_anchor_idx", "entry_anchor_time", "entry_idx", "entry_time", "entry_price", "stop_price", "up_bi_is_sure"
+      ],
+      "notes": "Trace rows have different shapes depending on action; header is union."
+    },
+    {
+      "pattern": "{symbol}_{tf}_signal_events_v7_bi.csv",
+      "columns": [
+        "event_seq", "symbol", "timeframe", "event_type", "event_time", "event_date", "bar_index", "price", "stop_price",
+        "planned_exit_idx", "planned_exit_time", "trigger_price_ref", "reason", "signal_text", "summary_text", "trade_id",
+        "structure_type", "bi_id", "bi_direction", "bi_start_index", "bi_start_time", "bi_start_price", "bi_end_index", "bi_end_time", "bi_end_price", "bi_bars", "bi_is_sure"
+      ],
+      "notes": "BI events include bi metadata and planned/actual exit info."
+    },
+    {
+      "pattern": "{symbol}_{tf}_signal_digest_v7_bi.csv",
+      "columns": ["symbol", "event_date", "timeframe", "latest_event_type", "latest_event_time", "latest_price", "stop_price", "bi_id", "reason", "signal_text", "event_count"]
+    }
+  ]
+}

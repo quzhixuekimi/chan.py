@@ -1,0 +1,33 @@
+{
+  "strategy": "v6_bspzs",
+  "files": [
+    {
+      "pattern": "{symbol}_{tf}_ohlcv_v6_bspzs.csv",
+      "columns": ["idx", "time", "open", "high", "low", "close", "volume"]
+    },
+    {
+      "pattern": "{symbol}_{tf}_zs_v6_bspzs.csv",
+      "columns": [
+        "idx", "begin_bi_idx", "end_bi_idx", "bi_in_idx", "bi_out_idx", "begin_time", "end_time", "low", "high", "peak_low", "peak_high", "bi_idx_list"
+      ]
+    },
+    {
+      "pattern": "{symbol}_{tf}_bsp_v6_bspzs.csv",
+      "columns": ["idx", "bi_idx", "klu_idx", "time", "price", "is_buy", "types", "is_sure", "types_raw"],
+      "notes": "types is normalized to comma-separated tokens like '1,2,3a'."
+    },
+    {
+      "pattern": "{symbol}_{tf}_signal_events_v6_bspzs.csv",
+      "columns": [
+        "eventseq", "symbol", "timeframe", "eventtype", "eventtime", "eventdate", "barindex", "price", "stopprice", "plannedexitidx", "plannedexittime", "triggerpriceref", "reason", "signaltext", "tradeid",
+        "structuretype", "biid", "bidirection", "bistartindex", "bistarttime", "bistartprice", "biendindex", "biendtime", "biendprice", "bibars", "biissure",
+        "entryidx", "entrytime", "entryprice", "exitidx", "exittimeactual", "exitpriceactual", "pnlabs", "pnlpct", "zs_idx", "zs_low", "zs_high", "peak_low", "peak_high", "bsp_type", "bsp_type_raw", "source_row_idx"
+      ],
+      "notes": "Function emits both ZS_FORMED and BSP events with full set of metadata; CSV header is union."
+    },
+    {
+      "pattern": "{symbol}_{tf}_signal_digest_v6_bspzs.csv",
+      "columns": ["symbol", "eventdate", "timeframe", "latesteventtype", "latesteventtime", "latestprice", "stopprice", "biid", "reason", "signaltext", "eventcount"]
+    }
+  ]
+}

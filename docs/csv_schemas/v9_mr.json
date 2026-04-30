@@ -1,0 +1,58 @@
+{
+  "strategy": "v9_mr",
+  "files": [
+    {
+      "pattern": "{symbol}_1d_ohlcv_v9_mr.csv",
+      "columns": [
+        "time", "open", "high", "low", "close", "volume", "idx",
+        "macd_line", "signal_line", "macd_hist",
+        "rsi14",
+        "ma20",
+        "vol_ma20",
+        "macd_cross_up", "macd_cross_down",
+        "hist_shrinking_2",
+        "rsi_rebound_from_oversold",
+        "rsi_fall_from_strong_zone",
+        "volume_ok_entry", "volume_breakdown", "volume_normal_or_above",
+        "recent_10d_low_prev"
+      ],
+      "notes": "Input OHLCV preserved; MRBacktester._prepare_indicators appends indicator and flag columns listed above. Additional upstream columns (if any) are also kept."
+    },
+    {
+      "pattern": "{symbol}_1d_trades_v9_mr.csv",
+      "columns": [
+        "trade_id", "symbol", "timeframe", "direction", "entry_idx", "entry_time", "entry_price",
+        "exit_idx", "exit_time", "exit_price", "stop_price", "exit_reason", "pnl_abs", "pnl_pct"
+      ]
+    },
+    {
+      "pattern": "{symbol}_1d_trade_trace_v9_mr.csv",
+      "columns": [
+        "symbol", "timeframe", "trade_id", "action", "signal_bar_index", "entry_idx", "signal_time", "entry_time",
+        "entry_price", "stop_price", "exit_idx", "exit_time", "exit_price", "reason"
+      ],
+      "notes": "Rows vary by action (OPEN vs STOP/EXIT); header is the union of keys."
+    },
+    {
+      "pattern": "{symbol}_1d_summary_v9_mr.csv",
+      "columns": ["symbol", "timeframe", "total_trades", "win_rate_pct", "avg_pnl_pct"]
+    },
+    {
+      "pattern": "{symbol}_1d_signal_events_v9_mr.csv",
+      "columns": [
+        "event_seq", "symbol", "timeframe", "event_type", "event_time", "event_date", "bar_index",
+        "price", "stop_price", "trigger_date", "reason", "signal_text", "structure_type"
+      ],
+      "dynamic_columns": [
+        "trade_id", "entry_time", "entry_price", "rsi14", "macd_line", "signal_line", "macd_hist",
+        "ma20", "volume", "vol_ma20", "pnl_abs", "pnl_pct", "stop_buffer_pct",
+        "hard_stop_buffered_price", "swing_stop_buffered_price"
+      ],
+      "notes": "Event rows include core fields above; MRBacktester may add extra keys per-event which appear as additional CSV columns."
+    },
+    {
+      "pattern": "{symbol}_1d_signal_digest_v9_mr.csv",
+      "columns": ["symbol", "event_date", "timeframe", "latest_event_type", "latest_event_time", "latest_price", "stop_price", "reason", "signal_text", "event_count"]
+    }
+  ]
+}

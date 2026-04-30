@@ -1,0 +1,78 @@
+{
+  "strategy": "v8_byma",
+  "files": [
+    {
+      "pattern": "{symbol}_{tf}_ohlcv_v8_byma.csv",
+      "columns": [
+        "dt", "open", "high", "low", "close", "volume", "idx",
+        "blue_upper", "blue_lower", "yellow_upper", "yellow_lower",
+        "yellow_upper_prev", "yellow_lower_prev", "yellow_rising",
+        "blue_over_yellow", "blue_below_yellow",
+        "in_blue_band", "above_blue_upper",
+        "ma55", "ma60", "ma65", "ma120", "ma250",
+        "above_ma55_60_65", "below_ma55_60_65",
+        "bull_env_ready_state", "bull_env_confirmed_state",
+        "external_trend_ok",
+        "close_prev_1", "close_prev_2", "blue_lower_prev_1", "blue_lower_prev_2",
+        "initial_entry_ready_state", "reentry_ready_state", "entry_ready_state",
+        "weaken_state", "stop_loss_state", "exit_trend_state"
+      ],
+      "notes": "compute_byma_indicators injects fields; runner appends confirmation/derived flags. All DataFrame columns are written."
+    },
+    {
+      "pattern": "{symbol}_{tf}_trades_v8_byma.csv",
+      "columns": [
+        "trade_id", "symbol", "timeframe", "structure_type", "direction",
+        "entry_idx", "entry_time", "entry_price", "entry_reason", "entry_regime_id",
+        "cycle_id", "cycle_trade_no", "stop_price", "exit_idx", "exit_time",
+        "exit_price", "exit_reason", "holding_bars", "pnl_abs", "pnl_pct"
+      ]
+    },
+    {
+      "pattern": "{symbol}_{tf}_cycles_v8_byma.csv",
+      "columns": [
+        "cycle_id", "symbol", "timeframe", "structure_type", "status", "start_idx", "start_time",
+        "end_idx", "end_time", "end_reason", "entry_signal_count", "trade_count", "closed_trade_count",
+        "win_trade_count", "loss_trade_count", "sum_trade_pnl_pct", "sum_trade_pnl_abs", "avg_trade_pnl_pct",
+        "max_trade_win_pct", "max_trade_loss_pct", "open_trade_id", "open_trade_count"
+      ]
+    },
+    {
+      "pattern": "{symbol}_{tf}_trade_trace_v8_byma.csv",
+      "columns": [
+        "symbol", "timeframe", "action", "reason", "trade_id", "bar_index", "time", "price", "bull_regime_id", "cycle_id", "cycle_trade_no"
+      ],
+      "notes": "Rows may include extra keys; header is union of keys present."
+    },
+    {
+      "pattern": "{symbol}_{tf}_summary_v8_byma.csv",
+      "columns": [
+        "symbol", "timeframe", "total_bars", "total_trades", "win_rate_pct", "avg_pnl_pct", "total_pnl_pct",
+        "avg_holding_bars", "max_win_pct", "max_loss_pct", "total_cycles", "completed_cycles", "open_cycles",
+        "cycle_win_rate_pct", "avg_cycle_pnl_pct", "total_cycle_pnl_pct", "entry_signals", "weaken_alerts", "trend_exits", "stop_losses"
+      ]
+    },
+    {
+      "pattern": "{symbol}_{tf}_signal_events_v8_byma.csv",
+      "columns": [
+        "event_seq", "symbol", "timeframe", "event_type", "event_time", "event_date", "bar_index",
+        "price", "latest_price", "stop_price", "planned_exit_idx", "planned_exit_time", "trigger_price_ref", "reason", "signal_text",
+        "trade_id", "structure_type", "priority",
+        "bull_regime_id", "cycle_id", "cycle_trade_no", "cycle_status", "cycle_trade_count", "cycle_closed_trade_count", "cycle_total_pnl_pct",
+        "entry_fired_in_regime", "entry_blocked_in_regime", "cooldown_until_idx", "bull_confirm_bars", "regime_cooldown_bars",
+        "open", "high", "low", "close", "blue_upper", "blue_lower", "yellow_upper", "yellow_lower",
+        "ma55", "ma60", "ma65", "ma120", "ma250",
+        "yellow_rising", "blue_over_yellow", "blue_below_yellow", "bull_env_ready_state", "bull_env_confirmed_state",
+        "initial_entry_ready_state", "reentry_ready_state", "entry_ready_state", "weaken_state", "exit_trend_state", "stop_loss_state"
+      ],
+      "notes": "Event rows include state snapshot and regime/cycle metadata; CSV header is union."
+    },
+    {
+      "pattern": "{symbol}_{tf}_signal_digest_v8_byma.csv",
+      "columns": [
+        "symbol", "event_date", "timeframe", "latest_event_type", "latest_event_time", "latest_price", "stop_price", "reason", "signal_text",
+        "bull_regime_id", "cycle_id", "cycle_trade_no", "cycle_status", "cycle_trade_count", "cycle_closed_trade_count", "cycle_total_pnl_pct", "entry_blocked_in_regime", "event_count"
+      ]
+    }
+  ]
+}
