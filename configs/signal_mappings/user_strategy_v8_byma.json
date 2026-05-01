@@ -1,0 +1,23 @@
+{
+  "1D": {
+    "SELL_SIGNAL": "sell",
+    "BUY_SIGNAL": "buy"
+  },
+  "4H": {
+    "LONG_WEAKEN_ALERT": "manual_review",
+    "LONG_EXIT_TREND": "sell",
+    "LONG_STOP_LOSS": "sell",
+    "BUY_SIGNAL": "buy",
+    "SELL_SIGNAL": "sell"
+  },
+  "2H": {
+    "LONG_WEAKEN_ALERT": "manual_review",
+    "BUY_SIGNAL": "buy",
+    "SELL_SIGNAL": "sell"
+  },
+  "1H": {
+    "LONG_ENTRY": "buy",
+    "BUY_SIGNAL": "buy",
+    "SELL_SIGNAL": "sell"
+  }
+}

@@ -1,11 +1,20 @@
 """Engine package for trade_system
 
-占位包：包含订单管理、执行器、撮合、风控等模块的占位文件。
+包含订单管理、执行器、风控、持仓追踪等模块。
 """
 
+from trade_system.engine.order_manager import OrderManager, OrderRequest, OrderResponse
+from trade_system.engine.executor import Executor, OrderResult
+from trade_system.engine.risk_manager import RiskManager
+from trade_system.engine.position_tracker import PositionTracker, Position
+
 __all__ = [
-  "order_manager",
-  "matching_engine",
-  "executor",
-  "risk_manager",
+  "OrderManager",
+  "OrderRequest",
+  "OrderResponse",
+  "Executor",
+  "OrderResult",
+  "RiskManager",
+  "PositionTracker",
+  "Position",
 ]

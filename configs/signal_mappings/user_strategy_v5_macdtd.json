@@ -1,0 +1,18 @@
+{
+  "1D": {
+    "SELL_SIGNAL": "sell",
+    "BUY_SIGNAL": "buy"
+  },
+  "4H": {
+    "SELL_SIGNAL": "sell",
+    "BUY_SIGNAL": "buy"
+  },
+  "2H": {
+    "SELL_SIGNAL": "sell",
+    "BUY_SIGNAL": "buy"
+  },
+  "1H": {
+    "SELL_SIGNAL": "sell",
+    "BUY_SIGNAL": "buy"
+  }
+}

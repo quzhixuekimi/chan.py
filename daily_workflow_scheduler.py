@@ -27,18 +27,11 @@ BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = "/tmp/daily_workflow_scheduler.log"
 
 DEFAULT_SYMBOLS = [
-  "QQQ",
-  "SPY",
-  "SOXL",
   "AAPL",
   "TSLA",
   "NVDA",
-  "AMD",
-  "HOOD",
   "COIN",
   "PLTR",
-  "OKLO",
-  "IONQ",
 ]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H"]
 
@@ -178,6 +171,42 @@ def run_analyze_step(config: WorkflowConfig) -> dict:
   }
 
 
+def _push_queue_to_telegram(config: WorkflowConfig):
+  try:
+    from trade_system.queue.writer import load_queue_today
+    from trade_system.notifiers.telegram import telegram_send_message
+
+    queue = load_queue_today()
+    signals = queue.get("signals", [])
+    if not signals:
+      return
+    buy_count = sum(1 for s in signals if s.get("action") == "buy")
+    sell_count = sum(1 for s in signals if s.get("action") == "sell")
+    manual_count = sum(1 for s in signals if s.get("action") == "") + sum(
+      1 for s in signals if s.get("action") == "manual_review"
+    )
+    lines = [
+      f"📋 今日交易队列 ({queue.get('generated_at', '')[:10]})",
+      f"共 {len(signals)} 个信号",
+      f"买入: {buy_count} | 卖出: {sell_count} | 待人工: {manual_count}",
+      "",
+    ]
+    for sig in signals[:10]:
+      action_emoji = {"buy": "✅", "sell": "🔴", "manual_review": "⚠️"}.get(
+        sig.get("action"), "❓"
+      )
+      lines.append(
+        f"{action_emoji} {sig.get('symbol', 'N/A')} {sig.get('action', 'N/A')} {sig.get('strategy', '')} {sig.get('period', '')}"
+      )
+    if len(signals) > 10:
+      lines.append(f"...还有 {len(signals) - 10} 个信号")
+    msg = "📋 交易队列生成完成\n" + "\n".join(lines)
+    telegram_send_message(msg)
+    logger.info("[QUEUE-PUSH] telegram推送成功")
+  except Exception as e:
+    logger.exception("[QUEUE-PUSH] telegram推送异常: %s", e)
+
+
 def run_backtest_step(config: WorkflowConfig, note: str | None = None) -> dict:
   backtest_url = f"{config.base_url.rstrip('/')}/api/chan/backtest"
   payload = {
@@ -197,7 +226,41 @@ def run_backtest_step(config: WorkflowConfig, note: str | None = None) -> dict:
   requested = data.get("data", {}).get("requested_strategies", []) or []
   logger.info("[BACKTEST] ok run_mode=all requested_strategies=%s", requested)
   logger.debug("[BACKTEST] response=%s", json.dumps(data, ensure_ascii=False)[:4000])
+
   return data
+
+
+def generate_queue_step(config: WorkflowConfig):
+  try:
+    from pathlib import Path
+    from trade_system.queue.writer import write_queue_from_multiple_digests
+
+    base_dir = Path(__file__).resolve().parent
+    # 搜索各策略目录下的results文件夹
+    strategy_dirs = [
+      base_dir / "user_strategy_v5_macdtd" / "results",
+      base_dir / "user_strategy_v7_bi" / "results",
+      base_dir / "user_strategy_v8_byma" / "results",
+    ]
+    digest_files = []
+    for d in strategy_dirs:
+      if d.exists():
+        digest_files.extend(d.glob("market_signal_digest_last_per_symbol_*.csv"))
+
+    if digest_files:
+      out = write_queue_from_multiple_digests(digest_files)
+      logger.info(
+        "[QUEUE] wrote queue from %s digest files output=%s", len(digest_files), out
+      )
+      # Push queue summary to telegram
+      if config.notify_enabled:
+        _push_queue_to_telegram(config)
+    else:
+      logger.warning("[QUEUE] no digest files found in strategy directories")
+  except Exception as e:
+    logger.exception("[QUEUE] failed to write queue: %s", e)
+    if not config.continue_on_analyze_error:
+      raise
 
 
 def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
@@ -346,6 +409,8 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
   requested_strategies = (
     backtest_result.get("data", {}).get("requested_strategies", []) or []
   )
+
+  generate_queue_step(config)
 
   if getattr(config, "notify_aggregate", "byrule") == "bystock":
     try:
@@ -678,7 +743,7 @@ def main() -> None:
   scheduler.add_job(
     run_daily_workflow_with_retry,
     trigger=CronTrigger(
-      day_of_week="tue-sat",
+      day_of_week="mon-sat",
       hour=config.cron_hour,
       minute=config.cron_minute,
       timezone=config.timezone,
