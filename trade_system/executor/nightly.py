@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import json
 from datetime import datetime, time
 from pathlib import Path
 from typing import NamedTuple, Literal
@@ -16,6 +17,15 @@ logging.basicConfig(
   level=logging.INFO,
   format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
 )
+
+file_handler = logging.FileHandler("/tmp/nightly_executor.log", encoding="utf-8")
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(
+  logging.Formatter("%(asctime)s | %(name)s | %(levelname)s | %(message)s")
+)
+
+root_logger = logging.getLogger()
+root_logger.addHandler(file_handler)
 
 logger = logging.getLogger("nightly_executor")
 
@@ -66,7 +76,7 @@ async def execute_order(
 
   ret, data = await asyncio.to_thread(
     trd_ctx.place_order,
-    price=1,
+    price=1,  # 市价单价格传0，富途会忽略此字段
     qty=qty,
     code=code,
     trd_side=trd_side,
@@ -75,11 +85,17 @@ async def execute_order(
   )
 
   if ret == RET_OK:
+    # 富途成交回报中，成交价在 dealt_price 列；price 是委托价（此处为0）
+    row = data.iloc[0]
+    filled_price = row.get("dealt_price")
+    if filled_price is None or filled_price == 0:
+      # 回退到 price 列（部分版本/环境下列名不同）
+      filled_price = row.get("price", 0)
     return {
       "success": True,
-      "order_id": data.iloc[0]["order_id"],
-      "filled_price": data.iloc[0].get("price", 0),
-      "filled_qty": data.iloc[0].get("qty", 0),
+      "order_id": row["order_id"],
+      "filled_price": filled_price,
+      "filled_qty": row.get("dealt_qty", row.get("qty", 0)),
     }
 
   return {
@@ -138,96 +154,134 @@ class NightlyExecutor:
         ctx_created_here = True
         logger.info("OpenSecTradeContext创建成功")
 
-      results = []
+        results = []
 
-      for signal in queue["signals"]:
-        if signal.get("status") != "queued":
-          logger.info(f"跳过非queued信号: {signal}")
-          continue
+        for signal in queue["signals"]:
+          if signal.get("status") != "queued":
+            logger.info(f"跳过非queued信号: {signal}")
+            continue
 
-        symbol = signal["symbol"]
-        action = signal["action"]
-        logger.info(f"开始处理信号: symbol={symbol}, action={action}")
+          symbol = signal["symbol"]
+          action = signal["action"]
+          signal_id = signal.get("id", "")
+          logger.info(f"开始处理信号: symbol={symbol}, action={action}, id={signal_id}")
 
-        if action == "manual_review":
-          results.append(
-            {
-              "symbol": symbol,
-              "status": "manual_review",
-              "reason": "conflict detected",
-            }
-          )
-          logger.info(f"{symbol} 需要人工审核，跳过自动下单")
-          continue
-
-        if action == "sell":
-          open_positions = self.position_tracker.get_open_positions(symbol=symbol)
-          if not open_positions:
-            logger.warning(f"{symbol} 卖出信号但无未平仓买入记录，跳过")
+          if action == "manual_review":
             results.append(
               {
                 "symbol": symbol,
-                "status": "skipped",
-                "reason": "no open position for sell",
+                "status": "manual_review",
+                "reason": "conflict detected",
               }
             )
+            logger.info(f"{symbol} 需要人工审核，跳过自动下单")
             continue
 
-        result = await execute_order(
-          symbol=symbol,
-          action=action,
-          qty=self.config.order_qty,
-          trd_ctx=self.trd_ctx,
-        )
+          if action == "sell":
+            open_positions = self.position_tracker.get_open_positions(symbol=symbol)
+            if not open_positions:
+              logger.warning(f"{symbol} 卖出信号但无未平仓买入记录，跳过")
+              results.append(
+                {
+                  "symbol": symbol,
+                  "status": "skipped",
+                  "reason": "no open position for sell",
+                }
+              )
+              # 更新信号状态
+              if signal_id:
+                for sig in queue["signals"]:
+                  if sig.get("id") == signal_id:
+                    sig["status"] = "skipped"
+                    break
+              continue
 
-        results.append(
-          {
-            "symbol": symbol,
-            "signal": signal,
-            "result": result,
-          }
-        )
-        logger.info(f"订单结果: {symbol} {action} -> {result}")
+          result = await execute_order(
+            symbol=symbol,
+            action=action,
+            qty=self.config.order_qty,
+            trd_ctx=self.trd_ctx,
+          )
 
-        if result.get("success"):
-          self._push_telegram(symbol, action, result, signal)
-
-          order_req = type(
-            "OrderReq",
-            (),
+          results.append(
             {
               "symbol": symbol,
-              "strategy": signal.get("strategy", ""),
-              "period": signal.get("period", ""),
-            },
-          )()
+              "signal": signal,
+              "result": result,
+            }
+          )
+          logger.info(f"订单结果: {symbol} {action} -> {result}")
 
-          order_res = type(
-            "OrderRes",
-            (),
-            {
-              "order_id": result.get("order_id", ""),
-              "filled_price": result.get("filled_price", 0),
-              "filled_qty": result.get("filled_qty", 0),
-            },
-          )()
+          if result.get("success"):
+            # 更新信号状态为 filled
+            if signal_id:
+              for sig in queue["signals"]:
+                if sig.get("id") == signal_id:
+                  sig["status"] = "filled"
+                  break
+            self._push_telegram(symbol, action, result, signal)
 
-          if action == "buy":
-            self.position_tracker.on_buy_filled(
-              order_req,
-              order_res,
-              queue_id=signal.get("id", ""),
-            )
-            logger.info(f"{symbol} 买入持仓记录已更新")
-          elif action == "sell":
-            self.position_tracker.on_sell_filled(
-              order_req,
-              order_res,
-              reason=signal.get("strategy", "manual"),
-            )
-            logger.info(f"{symbol} 卖出持仓记录已更新")
+            order_req = type(
+              "OrderReq",
+              (),
+              {
+                "symbol": symbol,
+                "strategy": signal.get("strategy", ""),
+                "period": signal.get("period", ""),
+              },
+            )()
 
-      return {"executed": results}
+            order_res = type(
+              "OrderRes",
+              (),
+              {
+                "order_id": result.get("order_id", ""),
+                "filled_price": result.get("filled_price", 0),
+                "filled_qty": result.get("filled_qty", 0),
+              },
+            )()
+
+            if action == "buy":
+              self.position_tracker.on_buy_filled(
+                order_req,
+                order_res,
+                queue_id=signal_id,
+              )
+              logger.info(f"{symbol} 买入持仓记录已更新")
+            elif action == "sell":
+              related_qid = signal.get("related_queue_id", "")
+              self.position_tracker.on_sell_filled(
+                order_req,
+                order_res,
+                reason=signal.get("strategy", "manual"),
+                related_queue_id=related_qid,
+              )
+              logger.info(
+                f"{symbol} 卖出持仓记录已更新，related_queue_id={related_qid}"
+              )
+          else:
+            # 下单失败，更新状态
+            if signal_id:
+              for sig in queue["signals"]:
+                if sig.get("id") == signal_id:
+                  sig["status"] = "failed"
+                  break
+
+        # 回写 queue.json，更新信号状态防止重复下单
+        try:
+          from trade_system.queue.writer import _get_queue_dir
+
+          today = datetime.now().strftime("%Y%m%d")
+          queue_path = _get_queue_dir() / f"{today}-queue.json"
+          queue_path.parent.mkdir(parents=True, exist_ok=True)
+          queue_path.write_text(
+            json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          logger.info(f"已回写队列状态: {queue_path}")
+        except Exception as e:
+          logger.exception(f"回写队列状态失败: {e}")
+
+        return {"executed": results}
 
     except Exception:
       logger.exception("NightlyExecutor执行异常")

@@ -135,15 +135,28 @@ class PositionTracker:
     order_request,
     order_result,
     reason: str = "unknown",
+    related_queue_id: str = "",
   ) -> Optional[Position]:
-    """Match sell order to existing open position and close it."""
+    """Match sell order to existing open position and close it.
+
+    If related_queue_id is provided, match that specific position.
+    Otherwise, match the oldest open position for this symbol.
+    """
     symbol = order_request.symbol
-    # Find open position for this symbol
     target_pos = None
-    for pos in self.positions.values():
-      if pos.symbol == symbol and not pos.is_closed:
+
+    # 优先按 related_queue_id 精确匹配
+    if related_queue_id:
+      pos = self.positions.get(related_queue_id)
+      if pos and pos.symbol == symbol and not pos.is_closed:
         target_pos = pos
-        break
+
+    # 回退：按 symbol 匹配最早的未平仓持仓
+    if target_pos is None:
+      for pos in self.positions.values():
+        if pos.symbol == symbol and not pos.is_closed:
+          target_pos = pos
+          break
 
     if target_pos is None:
       return None
