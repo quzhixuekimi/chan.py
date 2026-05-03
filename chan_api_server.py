@@ -662,7 +662,7 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
           high=float(getattr(klu, "high")),
           low=float(getattr(klu, "low")),
           close=float(getattr(klu, "close")),
-          volume=_safe_float(getattr(klu, "volume", None)),
+          volume=_safe_float(getattr(getattr(klu, "trade_info", None), "metric", {}).get("volume")),
         )
       )
 
