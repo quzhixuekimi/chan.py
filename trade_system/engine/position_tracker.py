@@ -18,13 +18,14 @@ class Position:
   buy_price: float
   buy_time: str
   quantity: int
-  queue_id: str = ""  # original signal queue id
+  buy_signal_id: str = ""
 
   # Sell fields
   sell_order_id: Optional[str] = None
   sell_price: Optional[float] = None
   sell_time: Optional[str] = None
-  sell_reason: Optional[str] = None  # "target", "stop", "manual"
+  sell_reason: Optional[str] = None
+  sell_signal_id: Optional[str] = None
 
   @property
   def is_closed(self) -> bool:
@@ -67,7 +68,7 @@ class Position:
       buy_price=data["buy_price"],
       buy_time=data["buy_time"],
       quantity=data["quantity"],
-      queue_id=data.get("queue_id", ""),
+      buy_signal_id=data.get("buy_signal_id", data.get("queue_id", "")),
       sell_order_id=data.get("sell_order_id"),
       sell_price=data.get("sell_price"),
       sell_time=data.get("sell_time"),
@@ -89,19 +90,21 @@ class PositionTracker:
     return self.positions_dir / f"{today}-positions.json"
 
   def _load(self):
-    """Load existing positions from today's file if exists."""
-    pfile = self._positions_file()
-    if pfile.exists():
+    if not self.positions_dir.exists():
+      return
+
+    all_files = sorted(self.positions_dir.glob("*-positions.json"), reverse=True)
+    for pfile in all_files:
       try:
         data = json.loads(pfile.read_text(encoding="utf-8"))
         for item in data.get("positions", []):
           pos = Position.from_dict(item)
-          self.positions[pos.buy_order_id] = pos
+          if pos.buy_order_id and pos.buy_order_id not in self.positions and not pos.is_closed:
+            self.positions[pos.buy_order_id] = pos
       except Exception:
         pass
 
   def _save(self):
-    """Persist positions to today's file."""
     pfile = self._positions_file()
     data = {
       "updated_at": datetime.now().isoformat(),
@@ -113,9 +116,8 @@ class PositionTracker:
     self,
     order_request,
     order_result,
-    queue_id: str = "",
+    buy_signal_id: str = "",
   ) -> Position:
-    """Record a new position after buy order is filled."""
     pos = Position(
       symbol=order_request.symbol,
       strategy=getattr(order_request, "strategy", "unknown"),
@@ -123,8 +125,8 @@ class PositionTracker:
       buy_order_id=order_result.order_id,
       buy_price=order_result.filled_price,
       buy_time=datetime.now().isoformat(),
-      quantity=order_result.filled_qty,
-      queue_id=queue_id,
+      quantity=1,
+      buy_signal_id=buy_signal_id,
     )
     self.positions[pos.buy_order_id] = pos
     self._save()
@@ -135,28 +137,15 @@ class PositionTracker:
     order_request,
     order_result,
     reason: str = "unknown",
-    related_queue_id: str = "",
+    sell_signal_id: str = "",
   ) -> Optional[Position]:
-    """Match sell order to existing open position and close it.
-
-    If related_queue_id is provided, match that specific position.
-    Otherwise, match the oldest open position for this symbol.
-    """
     symbol = order_request.symbol
     target_pos = None
 
-    # 优先按 related_queue_id 精确匹配
-    if related_queue_id:
-      pos = self.positions.get(related_queue_id)
-      if pos and pos.symbol == symbol and not pos.is_closed:
+    for pos in self.positions.values():
+      if pos.symbol == symbol and not pos.is_closed:
         target_pos = pos
-
-    # 回退：按 symbol 匹配最早的未平仓持仓
-    if target_pos is None:
-      for pos in self.positions.values():
-        if pos.symbol == symbol and not pos.is_closed:
-          target_pos = pos
-          break
+        break
 
     if target_pos is None:
       return None
@@ -165,6 +154,7 @@ class PositionTracker:
     target_pos.sell_price = order_result.filled_price
     target_pos.sell_time = datetime.now().isoformat()
     target_pos.sell_reason = reason
+    target_pos.sell_signal_id = sell_signal_id if sell_signal_id else None
     self._save()
     return target_pos
 

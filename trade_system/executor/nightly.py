@@ -79,7 +79,7 @@ async def execute_order(
 
   ret, data = await asyncio.to_thread(
     trd_ctx.place_order,
-    price=1,  # 市价单价格传0，富途会忽略此字段
+    price=0,
     qty=qty,
     code=code,
     trd_side=trd_side,
@@ -87,23 +87,20 @@ async def execute_order(
     order_type=OrderType.MARKET,
   )
 
-  if ret == RET_OK:
-    # 富途成交回报中，成交价在 dealt_price 列；price 是委托价（此处为0）
-    row = data.iloc[0]
-    filled_price = row.get("dealt_price")
-    if filled_price is None or filled_price == 0:
-      # 回退到 price 列（部分版本/环境下列名不同）
-      filled_price = row.get("price", 0)
+  if ret != RET_OK:
     return {
-      "success": True,
-      "order_id": row["order_id"],
-      "filled_price": filled_price,
-      "filled_qty": row.get("dealt_qty", row.get("qty", 0)),
+      "success": False,
+      "error": str(data),
     }
 
+  row = data.iloc[0]
+  order_id = row["order_id"]
+
   return {
-    "success": False,
-    "error": str(data),
+    "success": True,
+    "order_id": order_id,
+    "filled_price": row.get("dealt_avg_price", 0) or row.get("price", 0),
+    "filled_qty": row.get("dealt_qty", 0),
   }
 
 
@@ -248,19 +245,18 @@ class NightlyExecutor:
               self.position_tracker.on_buy_filled(
                 order_req,
                 order_res,
-                queue_id=signal_id,
+                buy_signal_id=signal_id,
               )
               logger.info(f"{symbol} 买入持仓记录已更新")
             elif action == "sell":
-              related_qid = signal.get("related_queue_id", "")
               self.position_tracker.on_sell_filled(
                 order_req,
                 order_res,
                 reason=signal.get("strategy", "manual"),
-                related_queue_id=related_qid,
+                sell_signal_id=signal_id,
               )
               logger.info(
-                f"{symbol} 卖出持仓记录已更新，related_queue_id={related_qid}"
+                f"{symbol} 卖出持仓记录已更新，sell_signal_id={signal_id}"
               )
           else:
             # 下单失败，更新状态

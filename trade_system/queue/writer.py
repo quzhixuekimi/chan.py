@@ -67,7 +67,6 @@ class Signal(NamedTuple):
   stop_price: float | None
   status: Literal["queued", "manual_review", "filled", "cancelled", "failed"]
   generated_at: str
-  related_queue_id: str = ""
 
 
 def _build_signal(
@@ -79,7 +78,6 @@ def _build_signal(
   status: Literal[
     "queued", "manual_review", "filled", "cancelled", "failed"
   ] = "queued",
-  related_queue_id: str = "",
 ) -> Signal:
   return Signal(
     id=str(uuid.uuid4()),
@@ -91,7 +89,6 @@ def _build_signal(
     stop_price=row.get("stop_price"),
     status=status,
     generated_at=datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
-    related_queue_id=related_queue_id,
   )
 
 
@@ -381,22 +378,6 @@ def write_queue_from_multiple_digests(
     sell_df = cast(pd.DataFrame, group.loc[group["action"] == "sell"])
     signal = _pick_signal(buy_df, sell_df)
     if signal:
-      # 如果是卖出信号，检查是否有未平仓的持仓，建立关联
-      if signal.action == "sell":
-        related_qid = _get_open_position_queue_id(symbol)
-        if related_qid:
-          signal = Signal(
-            id=signal.id,
-            symbol=signal.symbol,
-            action=signal.action,
-            strategy=signal.strategy,
-            period=signal.period,
-            target_price=signal.target_price,
-            stop_price=signal.stop_price,
-            status=signal.status,
-            generated_at=signal.generated_at,
-            related_queue_id=related_qid,
-          )
       queue_data["signals"].append(signal._asdict())
 
   if output_path is None:
