@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import uuid
 import json
@@ -239,6 +240,56 @@ def _pick_signal(buy_df: pd.DataFrame, sell_df: pd.DataFrame) -> Signal | None:
   return None
 
 
+def _load_bystock_sent_state() -> dict[str, dict]:
+  """从聚合信号的 sent state 中加载已发送过的 symbol → dedup 信息。
+
+  返回 {symbol: {fingerprint, last_sent_at, summary_text, ...}}。
+  用于在生成交易队列前过滤掉内容未变更的 symbol，避免重复交易。
+  """
+  sent_state_path = (
+    Path(__file__).resolve().parent.parent
+    / "_telegram_sent_state"
+    / "sent_digest_keys_bystock.json"
+  )
+  if not sent_state_path.exists():
+    return {}
+  try:
+    state = json.loads(sent_state_path.read_text(encoding="utf-8"))
+    items = state.get("items", {})
+    result: dict[str, dict] = {}
+    for key, val in items.items():
+      # key format: "SYMBOL::fingerprint"
+      if "::" in key:
+        sym = key.split("::")[0]
+        result[sym] = val
+    return result
+  except Exception:
+    logger.exception("failed to load bystock sent state")
+    return {}
+
+
+def _compute_symbol_fingerprint(symbol_rows: pd.DataFrame) -> str:
+  """计算某个 symbol 在当前 digest 数据中的 fingerprint。
+
+  与 aggregate_signals.py 的 sha256(aggregated_summary_text) 不同，
+  这里基于各策略原始 digest 行数据 hash，只要策略内容有变化，
+  fingerprint 就会不同。用于与 sent_digest_keys_bystock.json 中记录的
+  fingerprint 比较，判断是否需要重新入队。
+  """
+  hashes = []
+  for _, row in symbol_rows.iterrows():
+    parts = []
+    for col in sorted(symbol_rows.columns):
+      v = row.get(col, "")
+      # skip NaN for numeric columns
+      if isinstance(v, float) and math.isnan(v):
+        continue
+      parts.append(f"{col}={v}")
+    hashes.append("|".join(parts))
+  content = "\n".join(sorted(hashes))
+  return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 def write_queue_from_digest(digest_csv: Path, output_path: Path | None = None) -> Path:
   """从单个 digest CSV 生成队列（保持向后兼容）。"""
   df = pd.read_csv(digest_csv)
@@ -303,6 +354,8 @@ def write_queue_from_multiple_digests(
 
   merged = pd.concat(all_rows, ignore_index=True)
 
+  sent_state = _load_bystock_sent_state()
+
   queue_data = {
     "generated_at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
     "signals": [],
@@ -312,6 +365,18 @@ def write_queue_from_multiple_digests(
     if "action" not in group.columns:
       logger.warning(f"[QUEUE] symbol={symbol} group missing 'action' column, skipping")
       continue
+
+    cur_fp = _compute_symbol_fingerprint(group)
+    sent_info = sent_state.get(symbol)
+    if sent_info and sent_info.get("fingerprint") == cur_fp:
+      last_sent = sent_info.get("last_sent_at", "unknown")
+      logger.info(
+        f"[QUEUE] skip {symbol}: signal unchanged since {last_sent} "
+        f"(fingerprint {cur_fp[:16]}...). "
+        "聚合信号已发送过该内容，交易队列跳过以避免重复交易。"
+      )
+      continue
+
     buy_df = cast(pd.DataFrame, group.loc[group["action"] == "buy"])
     sell_df = cast(pd.DataFrame, group.loc[group["action"] == "sell"])
     signal = _pick_signal(buy_df, sell_df)

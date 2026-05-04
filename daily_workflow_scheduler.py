@@ -410,8 +410,6 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
     backtest_result.get("data", {}).get("requested_strategies", []) or []
   )
 
-  generate_queue_step(config)
-
   if getattr(config, "notify_aggregate", "byrule") == "bystock":
     try:
       import subprocess
@@ -439,6 +437,8 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
       logger.exception("[AGGREGATE] aggregation failed: %s", e)
 
   notify_result = run_notify_step(config, requested_strategies)
+
+  generate_queue_step(config)
 
   finished_at = _now_str(config.timezone)
   logger.info("[WORKFLOW] finished at=%s", finished_at)

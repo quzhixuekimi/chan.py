@@ -27,6 +27,9 @@ file_handler.setFormatter(
 root_logger = logging.getLogger()
 root_logger.addHandler(file_handler)
 
+logging.getLogger("trade_system").propagate = True
+logging.getLogger("trade_system").setLevel(logging.INFO)
+
 logger = logging.getLogger("nightly_executor")
 
 
