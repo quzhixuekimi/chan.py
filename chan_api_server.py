@@ -653,7 +653,14 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
 
   for ck in ck_list:
     for klu in getattr(ck, "lst", []):
-      klu_time = _safe_str(getattr(klu, "time", "")) or ""
+      # klu.time is a CTime object whose __str__ returns 'YYYY/MM/DD' for daily bars
+      # For analyze JSON we want daily times to include a 00:00 suffix ("YYYY/MM/DD 00:00").
+      raw_time = _safe_str(getattr(klu, "time", "")) or ""
+      if raw_time and len(raw_time) == 10 and raw_time.count("/") == 2:
+        # date-only string like '2010/06/29' -> append ' 00:00'
+        klu_time = f"{raw_time} 00:00"
+      else:
+        klu_time = raw_time
       raw_kline_list.append(
         RawKLineItem(
           idx=int(getattr(klu, "idx", -1)),
