@@ -651,16 +651,15 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
   bsp_list: list[BSPItem] = []
   macd_list: list[MacdItem] = []
 
+  def _norm_time(t):
+      s = _safe_str(t)
+      if s and len(s) == 10 and s.count("/") == 2:
+          return f"{s} 00:00"
+      return s
+
   for ck in ck_list:
     for klu in getattr(ck, "lst", []):
-      # klu.time is a CTime object whose __str__ returns 'YYYY/MM/DD' for daily bars
-      # For analyze JSON we want daily times to include a 00:00 suffix ("YYYY/MM/DD 00:00").
-      raw_time = _safe_str(getattr(klu, "time", "")) or ""
-      if raw_time and len(raw_time) == 10 and raw_time.count("/") == 2:
-        # date-only string like '2010/06/29' -> append ' 00:00'
-        klu_time = f"{raw_time} 00:00"
-      else:
-        klu_time = raw_time
+      klu_time = _norm_time(getattr(klu, "time", ""))
       raw_kline_list.append(
         RawKLineItem(
           idx=int(getattr(klu, "idx", -1)),
@@ -693,8 +692,8 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
         seg_idx=getattr(bi, "seg_idx", None),
         begin_klu_idx=getattr(begin_klu, "idx", None),
         end_klu_idx=getattr(end_klu, "idx", None),
-        begin_time=_safe_str(getattr(begin_klu, "time", None)),
-        end_time=_safe_str(getattr(end_klu, "time", None)),
+        begin_time=_norm_time(getattr(begin_klu, "time", None)),
+        end_time=_norm_time(getattr(end_klu, "time", None)),
         begin_price=_safe_float(
           bi.get_begin_val() if hasattr(bi, "get_begin_val") else None
         ),
@@ -711,8 +710,8 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
         end_bi_idx=getattr(getattr(zs, "end_bi", None), "idx", None),
         bi_in_idx=getattr(getattr(zs, "bi_in", None), "idx", None),
         bi_out_idx=getattr(getattr(zs, "bi_out", None), "idx", None),
-        begin_time=_safe_str(getattr(getattr(zs, "begin", None), "time", None)),
-        end_time=_safe_str(getattr(getattr(zs, "end", None), "time", None)),
+        begin_time=_norm_time(getattr(getattr(zs, "begin", None), "time", None)),
+        end_time=_norm_time(getattr(getattr(zs, "end", None), "time", None)),
         low=_safe_float(getattr(zs, "low", None)),
         high=_safe_float(getattr(zs, "high", None)),
         peak_low=_safe_float(getattr(zs, "peak_low", None)),
@@ -786,7 +785,7 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
         idx=i,
         bi_idx=getattr(bi_obj, "idx", None) if bi_obj else None,
         klu_idx=getattr(klu_obj, "idx", None) if klu_obj else None,
-        time=_safe_str(getattr(klu_obj, "time", None)) if klu_obj else None,
+        time=_norm_time(getattr(klu_obj, "time", None)) if klu_obj else None,
         price=price,
         is_buy=bool(getattr(bsp, "is_buy", False)),
         types=types,
