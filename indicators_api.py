@@ -285,6 +285,13 @@ def _build_indicators(code: str, level: LevelType) -> IndicatorsData:
   )
 
 
+def _normalize_stock_code(code: str) -> str:
+  code = code.strip().upper()
+  if ":" in code:
+    return code.split(":", 1)[0]
+  return code
+
+
 @router.get("/api/chan/indicators/health")
 def indicators_health():
   return {"code": 0, "message": "ok"}
@@ -293,7 +300,8 @@ def indicators_health():
 @router.post("/api/chan/indicators", response_model=IndicatorsResponse)
 def get_indicators(req: IndicatorsRequest):
   try:
-    data = _build_indicators(req.code.upper().strip(), req.level)
+    code = _normalize_stock_code(req.code)
+    data = _build_indicators(code, req.level)
     return IndicatorsResponse(code=0, message="ok", data=data)
   except Exception as e:
     raise HTTPException(status_code=500, detail=str(e))
