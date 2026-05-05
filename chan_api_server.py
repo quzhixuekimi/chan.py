@@ -830,10 +830,17 @@ def health():
   return {"code": 0, "message": "ok"}
 
 
+def _normalize_stock_code(code: str) -> str:
+  code = code.strip().upper()
+  if ':' in code:
+    return code.split(':', 1)[0]
+  return code
+
+
 @router.post("/api/chan/analyze", response_model=ChanAnalyzeResponse)
 def analyze_chan(req: ChanAnalyzeRequest):
   try:
-    code = req.code.upper().strip()
+    code = _normalize_stock_code(req.code)
     level = req.level
 
     if level == "1D":
