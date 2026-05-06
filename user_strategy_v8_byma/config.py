@@ -30,7 +30,7 @@ class StrategyConfig:
     ]
   )
 
-  fresh_days: int = 10
+  fresh_days: int = 2
   allow_reentry: bool = True
   close_open_positions_on_last_bar: bool = True
   min_bars_required: int = 120

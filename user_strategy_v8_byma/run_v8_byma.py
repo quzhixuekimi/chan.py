@@ -470,7 +470,7 @@ def _event_type_rank(event_type: str) -> int:
 def build_last_digest_by_symbol(
   last_df: pd.DataFrame,
   reference_dates_df: pd.DataFrame | None = None,
-  fresh_days: int = 10,
+  fresh_days: int = 2,
 ) -> pd.DataFrame:
   cols = [
     "symbol",
