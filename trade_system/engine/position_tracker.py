@@ -5,6 +5,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import json
+import logging
+
+logger = logging.getLogger("position_tracker")
 
 
 @dataclass
@@ -91,9 +94,14 @@ class PositionTracker:
 
   def _load(self):
     if not self.positions_dir.exists():
+      logger.warning(f"持仓目录不存在: {self.positions_dir}")
       return
 
     all_files = sorted(self.positions_dir.glob("*-positions.json"), reverse=True)
+    if not all_files:
+      logger.info(f"未找到持仓文件: {self.positions_dir}")
+      return
+
     for pfile in all_files:
       try:
         data = json.loads(pfile.read_text(encoding="utf-8"))
@@ -101,8 +109,8 @@ class PositionTracker:
           pos = Position.from_dict(item)
           if pos.buy_order_id and pos.buy_order_id not in self.positions and not pos.is_closed:
             self.positions[pos.buy_order_id] = pos
-      except Exception:
-        pass
+      except Exception as e:
+        logger.error(f"持仓文件解析失败 {pfile}: {e}")
 
   def _save(self):
     pfile = self._positions_file()

@@ -108,7 +108,12 @@ class NightlyExecutor:
   def __init__(self, trd_ctx=None, positions_dir: Path | None = None):
     self.trd_ctx = trd_ctx
     self.config = get_config()
-    self.positions_dir = positions_dir or Path("trade_system/data/positions")
+    # 使用绝对路径，与 writer.py 一致
+    if positions_dir:
+      self.positions_dir = Path(positions_dir).resolve()
+    else:
+      # 与 writer.py 的 _get_positions_dir() 一致
+      self.positions_dir = Path(__file__).resolve().parent.parent / "data" / "positions"
     self.position_tracker = PositionTracker(self.positions_dir)
 
   def _push_telegram(self, symbol: str, action: str, result: dict, signal: dict):
