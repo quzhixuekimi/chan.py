@@ -82,15 +82,41 @@ class Position:
 class PositionTracker:
   """Tracks all positions, persists to disk, links buy/sell orders."""
 
-  def __init__(self, positions_dir: Path):
+  def __init__(self, positions_dir: Path, trades_dir: Path | None = None):
     self.positions_dir = Path(positions_dir)
     self.positions_dir.mkdir(parents=True, exist_ok=True)
+    # trades_dir 与 positions_dir 同级，方便维护
+    if trades_dir is None:
+      self.trades_dir = self.positions_dir.parent / "trades"
+    else:
+      self.trades_dir = Path(trades_dir)
+    self.trades_dir.mkdir(parents=True, exist_ok=True)
     self.positions: dict[str, Position] = {}  # buy_order_id -> Position
     self._load()
 
   def _positions_file(self) -> Path:
     today = datetime.now().strftime("%Y%m%d")
     return self.positions_dir / f"{today}-positions.json"
+
+  def _trades_file(self, date: str | None = None) -> Path:
+    if date is None:
+      date = datetime.now().strftime("%Y%m%d")
+    return self.trades_dir / f"{date}-trades.json"
+
+  def _append_trade(self, position: Position):
+    tfile = self._trades_file()
+    today = datetime.now().strftime("%Y%m%d")
+    if tfile.exists():
+      try:
+        data = json.loads(tfile.read_text(encoding="utf-8"))
+      except Exception:
+        data = {"date": today, "trades": []}
+    else:
+      data = {"date": today, "trades": []}
+
+    data.setdefault("trades", []).append(position.to_dict())
+    tfile.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info(f"已保存平仓记录到 {tfile}: {position.symbol}")
 
   def _load(self):
     if not self.positions_dir.exists():
@@ -163,6 +189,10 @@ class PositionTracker:
     target_pos.sell_time = datetime.now().isoformat()
     target_pos.sell_reason = reason
     target_pos.sell_signal_id = sell_signal_id if sell_signal_id else None
+
+    buy_order_id = target_pos.buy_order_id
+    self._append_trade(target_pos)
+    del self.positions[buy_order_id]
     self._save()
     return target_pos
 
@@ -174,8 +204,17 @@ class PositionTracker:
     return result
 
   def get_closed_positions(self, symbol: Optional[str] = None) -> list[Position]:
-    """Get all closed positions."""
-    result = [p for p in self.positions.values() if p.is_closed]
+    result = []
+    if self.trades_dir.exists():
+      for tfile in sorted(self.trades_dir.glob("*-trades.json")):
+        try:
+          data = json.loads(tfile.read_text(encoding="utf-8"))
+          for item in data.get("trades", []):
+            pos = Position.from_dict(item)
+            if pos.is_closed:
+              result.append(pos)
+        except Exception as e:
+          logger.error(f"交易文件解析失败 {tfile}: {e}")
     if symbol:
       result = [p for p in result if p.symbol == symbol]
     return result
