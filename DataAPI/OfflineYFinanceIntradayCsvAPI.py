@@ -27,7 +27,9 @@ def _safe_filename_part(value: str | None) -> str:
 def _build_intraday_csv_cache_path(code: str, timeframe: str) -> Path:
   code_part = _safe_filename_part(code)
   tf_part = timeframe.lower()
-  return DATA_CACHE_DIR / f"{code_part}_{_today_str()}_yf_{tf_part}_730d.csv"
+  # 30m/15m only support 60d in yfinance; 1h/2h/4h support 730d
+  days_suffix = "60d" if tf_part in ("30m", "15m") else "730d"
+  return DATA_CACHE_DIR / f"{code_part}_{_today_str()}_yf_{tf_part}_{days_suffix}.csv"
 
 
 def _load_intraday_df(code: str, timeframe: str) -> pd.DataFrame:
@@ -125,3 +127,11 @@ class COfflineYFinance2HCsvAPI(_BaseOfflineYFinanceIntradayCsvAPI):
 
 class COfflineYFinance4HCsvAPI(_BaseOfflineYFinanceIntradayCsvAPI):
   TIMEFRAME = "4h"
+
+
+class COfflineYFinance30MCsvAPI(_BaseOfflineYFinanceIntradayCsvAPI):
+  TIMEFRAME = "30m"
+
+
+class COfflineYFinance15MCsvAPI(_BaseOfflineYFinanceIntradayCsvAPI):
+  TIMEFRAME = "15m"

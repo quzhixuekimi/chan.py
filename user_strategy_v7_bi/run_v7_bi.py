@@ -22,7 +22,7 @@ READABLE_EVENT_TYPES = {
   "STOP_LOSS_TRIGGERED",
 }
 
-TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h"]
+TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h", "30m", "15m"]
 FRESH_DAYS = 2
 
 
@@ -458,6 +458,16 @@ def build_last_digest_by_symbol(
       "1h_event_time",
       "1h_latest_price",
       "1h_stop_price",
+      "30m_event_type",
+      "30m_signal_text",
+      "30m_event_time",
+      "30m_latest_price",
+      "30m_stop_price",
+      "15m_event_type",
+      "15m_signal_text",
+      "15m_event_time",
+      "15m_latest_price",
+      "15m_stop_price",
       "has_signal",
       "summary_text",
       "summary_json",
@@ -618,7 +628,7 @@ def main():
       if tf.level == "1D":
         matches = list(data_dir.glob(f"{symbol}_*_1d.csv"))
       else:
-        matches = list(data_dir.glob(f"{symbol}_*_yf_{tf.name.lower()}_730d.csv"))
+        matches = list(data_dir.glob(f"{symbol}_*_yf_{tf.name.lower()}_*.csv"))
 
       if not matches:
         print(f" [!] 未找到 {symbol} 的 {tf.name} 数据文件，跳过")

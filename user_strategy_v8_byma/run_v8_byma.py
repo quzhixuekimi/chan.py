@@ -25,7 +25,7 @@ TELEGRAM_DIGEST_EVENT_TYPES = {
   "LONG_STOP_LOSS",
 }
 
-TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h"]
+TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h", "30m", "15m"]
 
 SYMBOL_TIMEFRAME_WHITELIST: Dict[str, set[str]] = {}
 
@@ -931,7 +931,7 @@ def main():
       if tf.level == "1D":
         matches = sorted(data_dir.glob(f"{symbol}_*_1d.csv"))
       else:
-        matches = sorted(data_dir.glob(f"{symbol}_*_yf_{tf.name.lower()}_730d.csv"))
+        matches = sorted(data_dir.glob(f"{symbol}_*_yf_{tf.name.lower()}_*.csv"))
 
       if not matches:
         print(f" [!] 未找到 {symbol} 的 {tf.name} 数据文件，跳过")

@@ -33,10 +33,10 @@ STRATEGY_DIGEST_REGISTRY = {
     "results_dir": BASE_DIR / "user_strategy_v8_byma" / "results",
     "digest_file": "market_signal_digest_last_per_symbol_v8_byma.csv",
   },
-  "v9_mr": {
-    "results_dir": BASE_DIR / "user_strategy_v9_mr" / "results",
-    "digest_file": "market_signal_digest_last_per_symbol_v9_mr.csv",
-  },
+  # "v9_mr": {
+  #  "results_dir": BASE_DIR / "user_strategy_v9_mr" / "results",
+  #  "digest_file": "market_signal_digest_last_per_symbol_v9_mr.csv",
+  # },
 }
 
 DEFAULT_STRATEGY_ID = "v7_bi"

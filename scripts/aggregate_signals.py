@@ -51,13 +51,13 @@ STRATEGIES = [
     / "results"
     / "market_signal_digest_last_per_symbol_v8_byma.csv",
   ),
-  (
-    "v9_mr",
-    BASE_DIR
-    / "user_strategy_v9_mr"
-    / "results"
-    / "market_signal_digest_last_per_symbol_v9_mr.csv",
-  ),
+  # (
+  #  "v9_mr",
+  #  BASE_DIR
+  #  / "user_strategy_v9_mr"
+  #  / "results"
+  #  / "market_signal_digest_last_per_symbol_v9_mr.csv",
+  # ),
 ]
 
 

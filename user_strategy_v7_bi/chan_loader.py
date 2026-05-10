@@ -26,6 +26,12 @@ def load_chan_data(
   if level == "1D":
     kl_type = KL_TYPE.K_DAY
     data_src = "custom:OfflineUsDailyCsvAPI.COfflineUsDailyCsvAPI"
+  elif level == "30M":
+    kl_type = KL_TYPE.K_30M
+    data_src = "custom:OfflineYFinanceIntradayCsvAPI.COfflineYFinance30MCsvAPI"
+  elif level == "15M":
+    kl_type = KL_TYPE.K_15M
+    data_src = "custom:OfflineYFinanceIntradayCsvAPI.COfflineYFinance15MCsvAPI"
   else:
     kl_type = KL_TYPE.K_60M
     data_src_map = {

@@ -40,7 +40,7 @@ if not logger.handlers:
   logger.addHandler(stream_handler)
 logger.propagate = False
 
-LevelType = Literal["1D", "1H", "2H", "4H"]
+LevelType = Literal["1D", "1H", "2H", "4H", "30M", "15M"]
 
 # =========================
 # Pydantic models
@@ -218,14 +218,17 @@ def _daily_cache_path(code: str) -> Path:
   return DATA_CACHE_DIR / f"{code.upper()}_{_today_str()}_1d.csv"
 
 
-def _intraday_cache_path(code: str, level: Literal["1H", "2H", "4H"]) -> Path:
+def _intraday_cache_path(code: str, level: Literal["1H", "2H", "4H", "30M", "15M"]) -> Path:
   level_map = {
     "1H": "1h",
     "2H": "2h",
     "4H": "4h",
+    "30M": "30m",
+    "15M": "15m",
   }
+  days_suffix = "60d" if level in ("30M", "15M") else "730d"
   return (
-    DATA_CACHE_DIR / f"{code.upper()}_{_today_str()}_yf_{level_map[level]}_730d.csv"
+    DATA_CACHE_DIR / f"{code.upper()}_{_today_str()}_yf_{level_map[level]}_{days_suffix}.csv"
   )
 
 
@@ -336,13 +339,81 @@ def fetch_60m_from_yfinance(code: str) -> pd.DataFrame:
   return df
 
 
-def _apply_intraday_bar_end_time(ts: pd.Timestamp, hours: int) -> pd.Timestamp:
+def fetch_30m_from_yfinance(code: str) -> pd.DataFrame:
+  import yfinance as yf
+
+  ticker = yf.Ticker(code.upper())
+  df = ticker.history(period="60d", interval="30m", auto_adjust=False, actions=False)
+
+  if df is None or df.empty:
+    raise ValueError(f"yfinance returns empty 30m data for {code}")
+
+  df = df.reset_index()
+
+  if "Datetime" in df.columns:
+    df = df.rename(columns={"Datetime": "time"})
+  elif "Date" in df.columns:
+    df = df.rename(columns={"Date": "time"})
+
+  df = df.rename(
+    columns={
+      "Open": "open",
+      "High": "high",
+      "Low": "low",
+      "Close": "close",
+      "Volume": "volume",
+    }
+  )
+
+  df = _normalize_columns(df)
+
+  if getattr(df["time"].dt, "tz", None) is not None:
+    df["time"] = df["time"].dt.tz_localize(None)
+
+  return df
+
+
+def fetch_15m_from_yfinance(code: str) -> pd.DataFrame:
+  import yfinance as yf
+
+  ticker = yf.Ticker(code.upper())
+  df = ticker.history(period="60d", interval="15m", auto_adjust=False, actions=False)
+
+  if df is None or df.empty:
+    raise ValueError(f"yfinance returns empty 15m data for {code}")
+
+  df = df.reset_index()
+
+  if "Datetime" in df.columns:
+    df = df.rename(columns={"Datetime": "time"})
+  elif "Date" in df.columns:
+    df = df.rename(columns={"Date": "time"})
+
+  df = df.rename(
+    columns={
+      "Open": "open",
+      "High": "high",
+      "Low": "low",
+      "Close": "close",
+      "Volume": "volume",
+    }
+  )
+
+  df = _normalize_columns(df)
+
+  if getattr(df["time"].dt, "tz", None) is not None:
+    df["time"] = df["time"].dt.tz_localize(None)
+
+  return df
+
+
+def _apply_intraday_bar_end_time(ts: pd.Timestamp, bar_minutes: int) -> pd.Timestamp:
   dt = pd.Timestamp(ts)
   base = dt.normalize()
 
   hhmm = dt.strftime("%H:%M")
 
-  if hours == 1:
+  if bar_minutes == 60:
     mapping = {
       "09:30": "10:30",
       "10:30": "11:30",
@@ -352,23 +423,68 @@ def _apply_intraday_bar_end_time(ts: pd.Timestamp, hours: int) -> pd.Timestamp:
       "14:30": "15:30",
       "15:30": "16:00",
     }
-  elif hours == 2:
+  elif bar_minutes == 120:
     mapping = {
       "09:30": "11:30",
       "11:30": "13:30",
       "13:30": "15:30",
       "15:30": "16:00",
     }
-  elif hours == 4:
+  elif bar_minutes == 240:
     mapping = {
       "09:30": "13:30",
       "13:30": "16:00",
     }
+  elif bar_minutes == 30:
+    mapping = {
+      "09:30": "10:00",
+      "10:00": "10:30",
+      "10:30": "11:00",
+      "11:00": "11:30",
+      "11:30": "12:00",
+      "12:00": "12:30",
+      "12:30": "13:00",
+      "13:00": "13:30",
+      "13:30": "14:00",
+      "14:00": "14:30",
+      "14:30": "15:00",
+      "15:00": "15:30",
+      "15:30": "16:00",
+    }
+  elif bar_minutes == 15:
+    mapping = {
+      "09:30": "09:45",
+      "09:45": "10:00",
+      "10:00": "10:15",
+      "10:15": "10:30",
+      "10:30": "10:45",
+      "10:45": "11:00",
+      "11:00": "11:15",
+      "11:15": "11:30",
+      "11:30": "11:45",
+      "11:45": "12:00",
+      "12:00": "12:15",
+      "12:15": "12:30",
+      "12:30": "12:45",
+      "12:45": "13:00",
+      "13:00": "13:15",
+      "13:15": "13:30",
+      "13:30": "13:45",
+      "13:45": "14:00",
+      "14:00": "14:15",
+      "14:15": "14:30",
+      "14:30": "14:45",
+      "14:45": "15:00",
+      "15:00": "15:15",
+      "15:15": "15:30",
+      "15:30": "15:45",
+      "15:45": "16:00",
+    }
   else:
-    raise ValueError(f"unsupported hours: {hours}")
+    raise ValueError(f"unsupported bar_minutes: {bar_minutes}")
 
   if hhmm not in mapping:
-    raise ValueError(f"unexpected intraday timestamp {hhmm} for {hours}H aggregation")
+    raise ValueError(f"unexpected intraday timestamp {hhmm} for {bar_minutes}M aggregation")
 
   end_hhmm = mapping[hhmm]
   end_hour, end_minute = map(int, end_hhmm.split(":"))
@@ -386,7 +502,7 @@ def aggregate_intraday(df_1h: pd.DataFrame, hours: int) -> pd.DataFrame:
   if hours == 1:
     allowed = ["09:30", "10:30", "11:30", "12:30", "13:30", "14:30", "15:30"]
     df = df[df["hhmm"].isin(allowed)].copy()
-    df["bar_end_time"] = df["time"].apply(lambda x: _apply_intraday_bar_end_time(x, 1))
+    df["bar_end_time"] = df["time"].apply(lambda x: _apply_intraday_bar_end_time(x, hours * 60))
     out = df[["bar_end_time", "open", "high", "low", "close", "volume"]].copy()
     out = out.rename(columns={"bar_end_time": "time"})
     return out.sort_values("time").reset_index(drop=True)
@@ -432,7 +548,7 @@ def aggregate_intraday(df_1h: pd.DataFrame, hours: int) -> pd.DataFrame:
     .reset_index(drop=True)
   )
 
-  agg["time"] = agg["time"].apply(lambda x: _apply_intraday_bar_end_time(x, hours))
+  agg["time"] = agg["time"].apply(lambda x: _apply_intraday_bar_end_time(x, hours * 60))
   return agg[["time", "open", "high", "low", "close", "volume"]]
 
 
@@ -462,43 +578,52 @@ def get_or_build_1d_csv(code: str) -> Path:
   return cache_path
 
 
-def ensure_intraday_day_cache(code: str) -> dict[str, Path]:
-  """
-  小时级按天缓存：
-  - 第一次访问任意 1H/2H/4H，抓一次 yfinance 60m/730d
-  - 一次性生成今天的 1H / 2H / 4H 三份 csv
-  - 同一天后续请求都直接命中本地缓存
-  """
-  path_1h = _intraday_cache_path(code, "1H")
-  path_2h = _intraday_cache_path(code, "2H")
-  path_4h = _intraday_cache_path(code, "4H")
+def ensure_intraday_day_cache(code: str, levels: list[str]) -> dict[str, Path]:
+  result: dict[str, Path] = {}
 
-  if path_1h.exists() and path_2h.exists() and path_4h.exists():
-    logger.info(f"hit intraday cache all-ready: code={code}")
-    return {
-      "1H": path_1h,
-      "2H": path_2h,
-      "4H": path_4h,
-    }
+  for level in levels:
+    path = _intraday_cache_path(code, level)
+    if path.exists():
+      result[level] = path
+      continue
 
-  df_1h = fetch_60m_from_yfinance(code)
-  df_2h = aggregate_intraday(df_1h, 2)
-  df_4h = aggregate_intraday(df_1h, 4)
-  df_1h_shifted = aggregate_intraday(df_1h, 1)
+    if level in ("1H", "2H", "4H"):
+      path_1h = _intraday_cache_path(code, "1H")
+      if not path_1h.exists():
+        df_1h = fetch_60m_from_yfinance(code)
+        df_1h_shifted = aggregate_intraday(df_1h, 1)
+        _save_csv(df_1h_shifted, path_1h)
+        result["1H"] = path_1h
+      if level == "2H" and not _intraday_cache_path(code, "2H").exists():
+        df_1h = fetch_60m_from_yfinance(code)
+        df_2h = aggregate_intraday(df_1h, 2)
+        _save_csv(df_2h, _intraday_cache_path(code, "2H"))
+      if level == "4H" and not _intraday_cache_path(code, "4H").exists():
+        df_1h = fetch_60m_from_yfinance(code)
+        df_4h = aggregate_intraday(df_1h, 4)
+        _save_csv(df_4h, _intraday_cache_path(code, "4H"))
+      result[level] = _intraday_cache_path(code, level)
+      logger.info(f"build intraday cache: {result[level]}")
 
-  _save_csv(df_1h_shifted, path_1h)
-  _save_csv(df_2h, path_2h)
-  _save_csv(df_4h, path_4h)
+    elif level == "30M":
+      df_30m = fetch_30m_from_yfinance(code)
+      df_30m["time"] = pd.to_datetime(df_30m["time"], errors="coerce")
+      df_30m = df_30m.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+      df_30m["time"] = df_30m["time"].apply(lambda x: _apply_intraday_bar_end_time(x, 30))
+      _save_csv(df_30m, path)
+      result["30M"] = path
+      logger.info(f"build intraday cache: {path}")
 
-  logger.info(f"build intraday cache: {path_1h}")
-  logger.info(f"build intraday cache: {path_2h}")
-  logger.info(f"build intraday cache: {path_4h}")
+    elif level == "15M":
+      df_15m = fetch_15m_from_yfinance(code)
+      df_15m["time"] = pd.to_datetime(df_15m["time"], errors="coerce")
+      df_15m = df_15m.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+      df_15m["time"] = df_15m["time"].apply(lambda x: _apply_intraday_bar_end_time(x, 15))
+      _save_csv(df_15m, path)
+      result["15M"] = path
+      logger.info(f"build intraday cache: {path}")
 
-  return {
-    "1H": path_1h,
-    "2H": path_2h,
-    "4H": path_4h,
-  }
+  return result
 
 
 # =========================
@@ -528,6 +653,8 @@ def build_chan_from_csv(code: str, level: LevelType):
       "1H": "COfflineYFinance1HCsvAPI",
       "2H": "COfflineYFinance2HCsvAPI",
       "4H": "COfflineYFinance4HCsvAPI",
+      "30M": "COfflineYFinance30MCsvAPI",
+      "15M": "COfflineYFinance15MCsvAPI",
     }
     data_src = f"custom:OfflineYFinanceIntradayCsvAPI.{data_src_map[level]}"
 
@@ -846,7 +973,7 @@ def analyze_chan(req: ChanAnalyzeRequest):
     if level == "1D":
       csv_path = get_or_build_1d_csv(code)
     else:
-      cache_map = ensure_intraday_day_cache(code)
+      cache_map = ensure_intraday_day_cache(code, [level])
       csv_path = cache_map[level]
 
     data = extract_chan_data(code, level, csv_path)

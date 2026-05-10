@@ -362,6 +362,14 @@ def build_last_digest_by_symbol(
       "1hsignaltext",
       "1heventtime",
       "1hlatestprice",
+      "30meventtype",
+      "30msignaltext",
+      "30meventtime",
+      "30mlatestprice",
+      "15meventtype",
+      "15msignaltext",
+      "15meventtime",
+      "15mlatestprice",
       "hassignal",
       "has_signal",
       "hastradingsignal",
@@ -370,7 +378,7 @@ def build_last_digest_by_symbol(
     ]
     return pd.DataFrame(columns=cols)
 
-  timeframe_order = ["1d", "4h", "2h", "1h"]
+  timeframe_order = ["1d", "4h", "2h", "1h", "30m", "15m"]
   trading_event_types = {
     "BSP1_BUY",
     "BSP1_SELL",
@@ -1160,8 +1168,7 @@ def find_csv_matches(
     ]
   else:
     patterns = [
-      f"{symbol}_*_yf_{tf_name}_730d.csv",
-      f"{symbol}_yf_{tf_name}_730d.csv",
+      f"{symbol}_*_yf_{tf_name}_*.csv",
       f"{symbol}_*_{tf_name}.csv",
     ]
 
@@ -1201,6 +1208,8 @@ def main() -> None:
     TF("4h", "4H"),
     TF("2h", "2H"),
     TF("1h", "1H"),
+    TF("30m", "30M"),
+    TF("15m", "15M"),
   ]
 
   chan_config = conf.chan_config

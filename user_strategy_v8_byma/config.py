@@ -27,6 +27,8 @@ class StrategyConfig:
       TimeframeConfig(name="4h", level="4H", enabled=True),
       TimeframeConfig(name="2h", level="2H", enabled=True),
       TimeframeConfig(name="1h", level="1H", enabled=True),
+      TimeframeConfig(name="30m", level="30M", enabled=True),
+      TimeframeConfig(name="15m", level="15M", enabled=True),
     ]
   )
 

@@ -15,7 +15,7 @@ from . import DataLoader
 from .backtest_engine import BacktestEngine
 
 
-TIMEFRAMES = ["1d", "4h", "2h", "1h"]
+TIMEFRAMES = ["1d", "4h", "2h", "1h", "30m", "15m"]
 TIMEFRAME_LEVELS = {"1d": "1D", "4h": "4H", "2h": "2H", "1h": "1H"}
 
 
@@ -48,7 +48,7 @@ def find_csv_for_timeframe(data_dir: Path, symbol: str, tf: str) -> Path:
       return matches[0]
   else:
     # For intraday, look for symbol_*_yf_*.csv
-    matches = list(data_dir.glob(f"{symbol}_*_yf_{tf}_730d.csv"))
+    matches = list(data_dir.glob(f"{symbol}_*_yf_{tf}_*.csv"))
     if matches:
       return matches[0]
   return None
