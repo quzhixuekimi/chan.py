@@ -13,7 +13,7 @@ router = APIRouter()
 BASE_DIR = Path(__file__).resolve().parent
 DATA_CACHE_DIR = BASE_DIR / "data_cache"
 
-LevelType = Literal["1D", "1H", "2H", "4H"]
+LevelType = Literal["1D", "1H", "2H", "4H", "30M", "15M"]
 
 
 class IndicatorsRequest(BaseModel):
@@ -76,18 +76,21 @@ def _build_daily_csv_cache_path(code: str) -> Path:
 def _build_intraday_csv_cache_path(code: str, timeframe: str) -> Path:
   code_part = _safe_filename_part(code)
   tf_part = timeframe.lower()
-  return DATA_CACHE_DIR / f"{code_part}_{_today_str()}_yf_{tf_part}_730d.csv"
+
+  # Default retention days for intraday files
+  days = 730
+  # Use shorter retention for higher-frequency intraday data
+  if tf_part in ("15m", "30m"):
+    days = 60
+
+  return DATA_CACHE_DIR / f"{code_part}_{_today_str()}_yf_{tf_part}_{days}d.csv"
 
 
 def _resolve_cache_path(code: str, level: LevelType) -> Path:
   if level == "1D":
     return _build_daily_csv_cache_path(code)
 
-  tf_map = {
-    "1H": "1h",
-    "2H": "2h",
-    "4H": "4h",
-  }
+  tf_map = {"1H": "1h", "2H": "2h", "4H": "4h", "30M": "30m", "15M": "15m"}
   return _build_intraday_csv_cache_path(code, tf_map[level])
 
 
