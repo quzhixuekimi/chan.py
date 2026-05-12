@@ -271,7 +271,7 @@ def build_symbol_digest(all_events: Dict[str, pd.DataFrame]) -> pd.DataFrame:
       "symbol": symbol,
       "reference_date": ref_date,
       "signal_date": ref_date,
-      "fresh_days": 2,
+      # "fresh_days": 2,
     }
 
     for tf in TIMEFRAMES:
@@ -330,9 +330,7 @@ def build_symbol_digest(all_events: Dict[str, pd.DataFrame]) -> pd.DataFrame:
       else:
         lines.append(f"{label}: 无信号")
 
-    item["summary_text"] = f"{symbol} | ref={ref_date} | fresh_days=2 | " + " ; ".join(
-      lines
-    )
+    item["summary_text"] = f"{symbol} | ref={ref_date} | " + " ; ".join(lines)
     rows.append(item)
 
   return pd.DataFrame(rows)
@@ -421,9 +419,7 @@ def build_market_digest(market_events: List[pd.DataFrame]) -> pd.DataFrame:
       else:
         lines.append(f"{label}: 无信号")
 
-    item["summary_text"] = f"{symbol} | ref={ref_date} | fresh_days=2 | " + " ; ".join(
-      lines
-    )
+    item["summary_text"] = f"{symbol} | ref={ref_date} | " + " ; ".join(lines)
 
     tf_payload = {}
     for tf in TIMEFRAMES:
