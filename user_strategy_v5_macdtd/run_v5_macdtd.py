@@ -39,18 +39,30 @@ def get_all_symbols(data_dir: Path) -> List[str]:
   return sorted(list(symbols))
 
 
-def find_csv_for_timeframe(data_dir: Path, symbol: str, tf: str) -> Path:
+from datetime import datetime
+
+
+def _today_str() -> str:
+  return datetime.now().strftime("%Y-%m-%d")
+
+
+def _build_csv_path(data_dir: Path, symbol: str, tf: str) -> Path:
+  """根据 timeframe 直接拼出精确的当日数据文件路径"""
   symbol = symbol.upper()
-  # For 1d, look for symbol_*_1d.csv
+  today = _today_str()
   if tf == "1d":
-    matches = list(data_dir.glob(f"{symbol}_*_1d.csv"))
-    if matches:
-      return matches[0]
-  else:
-    # For intraday, look for symbol_*_yf_*.csv
-    matches = list(data_dir.glob(f"{symbol}_*_yf_{tf}_*.csv"))
-    if matches:
-      return matches[0]
+    return data_dir / f"{symbol}_{today}_1d.csv"
+  elif tf in ("4h", "2h", "1h"):
+    return data_dir / f"{symbol}_{today}_yf_{tf}_730d.csv"
+  elif tf in ("30m", "15m"):
+    return data_dir / f"{symbol}_{today}_yf_{tf}_60d.csv"
+  return None
+
+
+def find_csv_for_timeframe(data_dir: Path, symbol: str, tf: str) -> Path:
+  path = _build_csv_path(data_dir, symbol, tf)
+  if path and path.exists():
+    return path
   return None
 
 
@@ -479,7 +491,6 @@ def main():
     symbol_events = []
 
     for tf in TIMEFRAMES:
-      csv_path = find_csv_for_timeframe(data_dir, symbol, tf)
       csv_path = find_csv_for_timeframe(data_dir, symbol, tf)
       if not csv_path:
         print(f"  [{tf}] no data file found")

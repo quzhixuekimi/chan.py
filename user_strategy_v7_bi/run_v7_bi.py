@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -625,16 +626,20 @@ def main():
       if not tf.enabled:
         continue
 
+      today = datetime.now().strftime("%Y-%m-%d")
       if tf.level == "1D":
-        matches = list(data_dir.glob(f"{symbol}_*_1d.csv"))
+        csv_path = data_dir / f"{symbol}_{today}_1d.csv"
+      elif tf.name in ("4h", "2h", "1h"):
+        csv_path = data_dir / f"{symbol}_{today}_yf_{tf.name}_730d.csv"
+      elif tf.name in ("30m", "15m"):
+        csv_path = data_dir / f"{symbol}_{today}_yf_{tf.name}_60d.csv"
       else:
-        matches = list(data_dir.glob(f"{symbol}_*_yf_{tf.name.lower()}_*.csv"))
-
-      if not matches:
-        print(f" [!] 未找到 {symbol} 的 {tf.name} 数据文件，跳过")
+        print(f" [!] 未知 timeframe: {tf.name}，跳过")
         continue
 
-      csv_path = matches[0]
+      if not csv_path.exists():
+        print(f" [!] 未找到 {symbol} 的 {tf.name} 数据文件，跳过")
+        continue
       print(f" 处理时间框架: {tf.name} ({tf.level}) -> {csv_path.name}")
 
       try:

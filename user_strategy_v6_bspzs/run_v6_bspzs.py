@@ -1153,31 +1153,33 @@ def extract_kline_data(kllist: Any) -> pd.DataFrame:
   return df
 
 
+from datetime import datetime
+
+
+def _today_str() -> str:
+  return datetime.now().strftime("%Y-%m-%d")
+
+
 def find_csv_matches(
   data_dir: Path, symbol: str, tf_level: str, tf_name: str
 ) -> List[Path]:
+  """返回精确的当日数据文件路径列表（与原逻辑兼容，仍返回 List）"""
   symbol = str(symbol).upper().strip()
-  tf_level = str(tf_level).upper().strip()
   tf_name = str(tf_name).lower().strip()
+  today = _today_str()
 
-  patterns = []
   if tf_level == "1D":
-    patterns = [
-      f"{symbol}_*_1d.csv",
-      f"{symbol}_1d.csv",
-    ]
+    path = data_dir / f"{symbol}_{today}_1d.csv"
+  elif tf_name in ("4h", "2h", "1h"):
+    path = data_dir / f"{symbol}_{today}_yf_{tf_name}_730d.csv"
+  elif tf_name in ("30m", "15m"):
+    path = data_dir / f"{symbol}_{today}_yf_{tf_name}_60d.csv"
   else:
-    patterns = [
-      f"{symbol}_*_yf_{tf_name}_*.csv",
-      f"{symbol}_*_{tf_name}.csv",
-    ]
+    return []
 
-  matches: List[Path] = []
-  for pattern in patterns:
-    matches.extend(list(data_dir.glob(pattern)))
-
-  unique_matches = sorted(set(matches))
-  return unique_matches
+  if path.exists():
+    return [path]
+  return []
 
 
 def main() -> None:

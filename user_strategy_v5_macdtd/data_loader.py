@@ -10,22 +10,21 @@ class DataLoader:
         self.cache_path = cache_path
 
     def _csv_path(self, symbol: str, timeframe: str) -> str:
-        # 假定 data_cache 中文件命名包含 symbol 和 timeframe 的信息
-        # 尝试寻找匹配文件
-        files = [f for f in os.listdir(self.cache_path) if f.endswith('.csv')]
-        # 优先精确匹配 symbol + timeframe 子串
-        for f in files:
-            if symbol in f and timeframe in f:
-                return os.path.join(self.cache_path, f)
-        # 其次尝试 symbol 任意 + timeframe
-        for f in files:
-            if timeframe in f:
-                return os.path.join(self.cache_path, f)
-        # 兜底：symbol 任意匹配
-        for f in files:
-            if symbol in f:
-                return os.path.join(self.cache_path, f)
-        raise FileNotFoundError(f"找不到 {symbol} {timeframe} 对应的 CSV 文件于 {self.cache_path}")
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        symbol = symbol.upper()
+        if timeframe == "1d":
+            fname = f"{symbol}_{today}_1d.csv"
+        elif timeframe in ("4h", "2h", "1h"):
+            fname = f"{symbol}_{today}_yf_{timeframe}_730d.csv"
+        elif timeframe in ("30m", "15m"):
+            fname = f"{symbol}_{today}_yf_{timeframe}_60d.csv"
+        else:
+            raise FileNotFoundError(f"unknown timeframe: {timeframe}")
+        path = os.path.join(self.cache_path, fname)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"找不到 {symbol} {timeframe} 对应的 CSV 文件于 {self.cache_path}")
+        return path
 
     def load(self, symbol: str, timeframe: str, start: Optional[str] = None, end: Optional[str] = None) -> pd.DataFrame:
         path = self._csv_path(symbol, timeframe)
