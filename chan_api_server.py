@@ -218,7 +218,9 @@ def _daily_cache_path(code: str) -> Path:
   return DATA_CACHE_DIR / f"{code.upper()}_{_today_str()}_1d.csv"
 
 
-def _intraday_cache_path(code: str, level: Literal["1H", "2H", "4H", "30M", "15M"]) -> Path:
+def _intraday_cache_path(
+  code: str, level: Literal["1H", "2H", "4H", "30M", "15M"]
+) -> Path:
   level_map = {
     "1H": "1h",
     "2H": "2h",
@@ -228,7 +230,8 @@ def _intraday_cache_path(code: str, level: Literal["1H", "2H", "4H", "30M", "15M
   }
   days_suffix = "60d" if level in ("30M", "15M") else "730d"
   return (
-    DATA_CACHE_DIR / f"{code.upper()}_{_today_str()}_yf_{level_map[level]}_{days_suffix}.csv"
+    DATA_CACHE_DIR
+    / f"{code.upper()}_{_today_str()}_yf_{level_map[level]}_{days_suffix}.csv"
   )
 
 
@@ -415,76 +418,78 @@ def _apply_intraday_bar_end_time(ts: pd.Timestamp, bar_minutes: int) -> pd.Times
 
   if bar_minutes == 60:
     mapping = {
-      "09:30": "10:30",
-      "10:30": "11:30",
-      "11:30": "12:30",
-      "12:30": "13:30",
-      "13:30": "14:30",
-      "14:30": "15:30",
-      "15:30": "16:00",
+      "09:30": "09:30",
+      "10:30": "10:30",
+      "11:30": "11:30",
+      "12:30": "12:30",
+      "13:30": "13:30",
+      "14:30": "14:30",
+      "15:30": "15:30",
     }
   elif bar_minutes == 120:
     mapping = {
-      "09:30": "11:30",
-      "11:30": "13:30",
-      "13:30": "15:30",
-      "15:30": "16:00",
+      "09:30": "09:30",
+      "11:30": "11:30",
+      "13:30": "13:30",
+      "15:30": "15:30",
     }
   elif bar_minutes == 240:
     mapping = {
-      "09:30": "13:30",
-      "13:30": "16:00",
+      "09:30": "09:30",
+      "13:30": "13:30",
     }
   elif bar_minutes == 30:
     mapping = {
-      "09:30": "10:00",
-      "10:00": "10:30",
-      "10:30": "11:00",
-      "11:00": "11:30",
-      "11:30": "12:00",
-      "12:00": "12:30",
-      "12:30": "13:00",
-      "13:00": "13:30",
-      "13:30": "14:00",
-      "14:00": "14:30",
-      "14:30": "15:00",
-      "15:00": "15:30",
-      "15:30": "16:00",
+      "09:30": "09:30",
+      "10:00": "10:00",
+      "10:30": "10:30",
+      "11:00": "11:00",
+      "11:30": "11:30",
+      "12:00": "12:00",
+      "12:30": "12:30",
+      "13:00": "13:00",
+      "13:30": "13:30",
+      "14:00": "14:00",
+      "14:30": "14:30",
+      "15:00": "15:00",
+      "15:30": "15:30",
     }
   elif bar_minutes == 15:
     mapping = {
-      "09:30": "09:45",
-      "09:45": "10:00",
-      "10:00": "10:15",
-      "10:15": "10:30",
-      "10:30": "10:45",
-      "10:45": "11:00",
-      "11:00": "11:15",
-      "11:15": "11:30",
-      "11:30": "11:45",
-      "11:45": "12:00",
-      "12:00": "12:15",
-      "12:15": "12:30",
-      "12:30": "12:45",
-      "12:45": "13:00",
-      "13:00": "13:15",
-      "13:15": "13:30",
-      "13:30": "13:45",
-      "13:45": "14:00",
-      "14:00": "14:15",
-      "14:15": "14:30",
-      "14:30": "14:45",
-      "14:45": "15:00",
-      "15:00": "15:15",
-      "15:15": "15:30",
-      "15:30": "15:45",
-      "15:45": "16:00",
+      "09:30": "09:30",
+      "09:45": "09:45",
+      "10:00": "10:00",
+      "10:15": "10:15",
+      "10:30": "10:30",
+      "10:45": "10:45",
+      "11:00": "11:00",
+      "11:15": "11:15",
+      "11:30": "11:30",
+      "11:45": "11:45",
+      "12:00": "12:00",
+      "12:15": "12:15",
+      "12:30": "12:30",
+      "12:45": "12:45",
+      "13:00": "13:00",
+      "13:15": "13:15",
+      "13:30": "13:30",
+      "13:45": "13:45",
+      "14:00": "14:00",
+      "14:15": "14:15",
+      "14:30": "14:30",
+      "14:45": "14:45",
+      "15:00": "15:00",
+      "15:15": "15:15",
+      "15:30": "15:30",
+      "15:45": "15:45",
     }
   else:
     raise ValueError(f"unsupported bar_minutes: {bar_minutes}")
 
   if hhmm not in mapping:
-    raise ValueError(f"unexpected intraday timestamp {hhmm} for {bar_minutes}M aggregation")
+    raise ValueError(
+      f"unexpected intraday timestamp {hhmm} for {bar_minutes}M aggregation"
+    )
 
   end_hhmm = mapping[hhmm]
   end_hour, end_minute = map(int, end_hhmm.split(":"))
@@ -502,7 +507,9 @@ def aggregate_intraday(df_1h: pd.DataFrame, hours: int) -> pd.DataFrame:
   if hours == 1:
     allowed = ["09:30", "10:30", "11:30", "12:30", "13:30", "14:30", "15:30"]
     df = df[df["hhmm"].isin(allowed)].copy()
-    df["bar_end_time"] = df["time"].apply(lambda x: _apply_intraday_bar_end_time(x, hours * 60))
+    df["bar_end_time"] = df["time"].apply(
+      lambda x: _apply_intraday_bar_end_time(x, hours * 60)
+    )
     out = df[["bar_end_time", "open", "high", "low", "close", "volume"]].copy()
     out = out.rename(columns={"bar_end_time": "time"})
     return out.sort_values("time").reset_index(drop=True)
@@ -609,7 +616,9 @@ def ensure_intraday_day_cache(code: str, levels: list[str]) -> dict[str, Path]:
       df_30m = fetch_30m_from_yfinance(code)
       df_30m["time"] = pd.to_datetime(df_30m["time"], errors="coerce")
       df_30m = df_30m.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
-      df_30m["time"] = df_30m["time"].apply(lambda x: _apply_intraday_bar_end_time(x, 30))
+      df_30m["time"] = df_30m["time"].apply(
+        lambda x: _apply_intraday_bar_end_time(x, 30)
+      )
       _save_csv(df_30m, path)
       result["30M"] = path
       logger.info(f"build intraday cache: {path}")
@@ -618,7 +627,9 @@ def ensure_intraday_day_cache(code: str, levels: list[str]) -> dict[str, Path]:
       df_15m = fetch_15m_from_yfinance(code)
       df_15m["time"] = pd.to_datetime(df_15m["time"], errors="coerce")
       df_15m = df_15m.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
-      df_15m["time"] = df_15m["time"].apply(lambda x: _apply_intraday_bar_end_time(x, 15))
+      df_15m["time"] = df_15m["time"].apply(
+        lambda x: _apply_intraday_bar_end_time(x, 15)
+      )
       _save_csv(df_15m, path)
       result["15M"] = path
       logger.info(f"build intraday cache: {path}")
@@ -779,10 +790,10 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
   macd_list: list[MacdItem] = []
 
   def _norm_time(t):
-      s = _safe_str(t)
-      if s and len(s) == 10 and s.count("/") == 2:
-          return f"{s} 00:00"
-      return s
+    s = _safe_str(t)
+    if s and len(s) == 10 and s.count("/") == 2:
+      return f"{s} 00:00"
+    return s
 
   for ck in ck_list:
     for klu in getattr(ck, "lst", []):
@@ -795,7 +806,9 @@ def extract_chan_data(code: str, level: LevelType, csv_path: Path) -> ChanAnalyz
           high=float(getattr(klu, "high")),
           low=float(getattr(klu, "low")),
           close=float(getattr(klu, "close")),
-          volume=_safe_float(getattr(getattr(klu, "trade_info", None), "metric", {}).get("volume")),
+          volume=_safe_float(
+            getattr(getattr(klu, "trade_info", None), "metric", {}).get("volume")
+          ),
         )
       )
 
@@ -959,8 +972,8 @@ def health():
 
 def _normalize_stock_code(code: str) -> str:
   code = code.strip().upper()
-  if ':' in code:
-    return code.split(':', 1)[0]
+  if ":" in code:
+    return code.split(":", 1)[0]
   return code
 
 
