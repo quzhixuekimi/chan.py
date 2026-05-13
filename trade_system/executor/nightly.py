@@ -1,7 +1,7 @@
 import logging
 import asyncio
 import json
-from datetime import datetime, time
+from datetime import datetime, time as dt_time
 import time
 from pathlib import Path
 from typing import NamedTuple, Literal
@@ -43,8 +43,8 @@ class MarketQuote(NamedTuple):
 
 def is_us_market_hours() -> bool:
   now = datetime.now(ZoneInfo("America/New_York"))
-  market_open = time(9, 30)
-  market_close = time(16, 0)
+  market_open = dt_time(9, 30)
+  market_close = dt_time(16, 0)
   current_time = now.time()
 
   if now.weekday() >= 5:
