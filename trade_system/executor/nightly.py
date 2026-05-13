@@ -74,20 +74,16 @@ async def _wait_filled(trd_ctx, order_id: str, timeout: float = 5.0) -> dict:
     Returns a dict with ``filled_price`` and ``filled_qty`` (both 0 on failure)."""
     start = time.time()
     while time.time() - start < timeout:
-        ret, detail = await asyncio.to_thread(trd_ctx.order_deal, order_id)
-        if ret == RET_OK and not detail.empty:
-            # 在成交明细中找到对应订单
-            row = detail.iloc[0]
-            # OrderStatus.OK = 0 表示完全成交（在 SDK 中对应常量）
-            status = getattr(row, "status", row.get("status"))
-            # 有的版本返回的是整数，有的返回 OrderStatus 枚举，统一判断 0 即可
+        ret, data = await asyncio.to_thread(trd_ctx.order_list_query, order_id=order_id)
+        if ret == RET_OK and not data.empty:
+            row = data.iloc[0]
+            status = row.get("status")
             if status == 0:
                 return {
                     "filled_price": row.get("dealt_avg_price", 0) or row.get("price", 0),
                     "filled_qty": row.get("dealt_qty", 0),
                 }
         await asyncio.sleep(0.3)
-    # 超时或未成交返回默认 0
     return {"filled_price": 0, "filled_qty": 0}
 
 
@@ -116,7 +112,7 @@ async def execute_order(
     row = data.iloc[0]
     order_id = row["order_id"]
 
-    # 通过 order_deal 接口查询真实成交价（模拟环境下也会返回模拟成交价）
+    # 通过 order_list_query 接口查询订单状态（模拟环境下也会返回模拟成交价）
     fill_info = await _wait_filled(trd_ctx, order_id)
 
     return {
