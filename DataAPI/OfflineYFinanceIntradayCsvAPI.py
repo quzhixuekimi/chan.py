@@ -21,7 +21,14 @@ def _today_str() -> str:
 def _safe_filename_part(value: str | None) -> str:
   if not value:
     return "none"
-  return str(value).replace("/", "-").replace(":", "_").replace(" ", "_")
+  # Replace unsafe characters and strip dot separators
+  return (
+    str(value)
+    .replace("/", "-")
+    .replace(":", "_")
+    .replace(".", "_")
+    .replace(" ", "_")
+  )
 
 
 def _build_intraday_csv_cache_path(code: str, timeframe: str) -> Path:

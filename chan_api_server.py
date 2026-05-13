@@ -972,8 +972,11 @@ def health():
 
 def _normalize_stock_code(code: str) -> str:
   code = code.strip().upper()
+  # Support both ':' and '.' as exchange separators and keep only the ticker symbol
   if ":" in code:
     return code.split(":", 1)[0]
+  if "." in code:
+    return code.split(".", 1)[0]
   return code
 
 

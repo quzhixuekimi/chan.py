@@ -66,7 +66,14 @@ def _today_str() -> str:
 def _safe_filename_part(value: str | None) -> str:
   if not value:
     return "none"
-  return str(value).replace("/", "-").replace(":", "_").replace(" ", "_")
+  # Replace unsafe characters and also strip dot separators used in stock codes
+  return (
+    str(value)
+    .replace("/", "-")
+    .replace(":", "_")
+    .replace(".", "_")
+    .replace(" ", "_")
+  )
 
 
 def _build_daily_csv_cache_path(code: str) -> Path:
@@ -290,8 +297,11 @@ def _build_indicators(code: str, level: LevelType) -> IndicatorsData:
 
 def _normalize_stock_code(code: str) -> str:
   code = code.strip().upper()
+  # Support both ':' and '.' as exchange delimiters
   if ":" in code:
     return code.split(":", 1)[0]
+  if "." in code:
+    return code.split(".", 1)[0]
   return code
 
 
