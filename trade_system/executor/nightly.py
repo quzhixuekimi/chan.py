@@ -2,6 +2,7 @@ import logging
 import asyncio
 import json
 from datetime import datetime, time
+import time
 from pathlib import Path
 from typing import NamedTuple, Literal
 from zoneinfo import ZoneInfo
@@ -68,40 +69,62 @@ async def get_realtime_quote(symbol: str, trd_ctx) -> MarketQuote | None:
   )
 
 
+async def _wait_filled(trd_ctx, order_id: str, timeout: float = 5.0) -> dict:
+    """Poll the order deal info until the order is filled or timeout.
+    Returns a dict with ``filled_price`` and ``filled_qty`` (both 0 on failure)."""
+    start = time.time()
+    while time.time() - start < timeout:
+        ret, detail = await asyncio.to_thread(trd_ctx.order_deal, order_id)
+        if ret == RET_OK and not detail.empty:
+            # 在成交明细中找到对应订单
+            row = detail.iloc[0]
+            # OrderStatus.OK = 0 表示完全成交（在 SDK 中对应常量）
+            status = getattr(row, "status", row.get("status"))
+            # 有的版本返回的是整数，有的返回 OrderStatus 枚举，统一判断 0 即可
+            if status == 0:
+                return {
+                    "filled_price": row.get("dealt_avg_price", 0) or row.get("price", 0),
+                    "filled_qty": row.get("dealt_qty", 0),
+                }
+        await asyncio.sleep(0.3)
+    # 超时或未成交返回默认 0
+    return {"filled_price": 0, "filled_qty": 0}
+
+
 async def execute_order(
   symbol: str,
   action: Literal["buy", "sell"],
   qty: int,
   trd_ctx,
 ) -> dict:
-  code = f"US.{symbol}"
-  trd_side = TrdSide.BUY if action == "buy" else TrdSide.SELL
+    code = f"US.{symbol}"
+    trd_side = TrdSide.BUY if action == "buy" else TrdSide.SELL
 
-  ret, data = await asyncio.to_thread(
-    trd_ctx.place_order,
-    price=0,
-    qty=qty,
-    code=code,
-    trd_side=trd_side,
-    trd_env=TrdEnv.SIMULATE,
-    order_type=OrderType.MARKET,
-  )
+    ret, data = await asyncio.to_thread(
+        trd_ctx.place_order,
+        price=0,
+        qty=qty,
+        code=code,
+        trd_side=trd_side,
+        trd_env=TrdEnv.SIMULATE,
+        order_type=OrderType.MARKET,
+    )
 
-  if ret != RET_OK:
+    if ret != RET_OK:
+        return {"success": False, "error": str(data)}
+
+    row = data.iloc[0]
+    order_id = row["order_id"]
+
+    # 通过 order_deal 接口查询真实成交价（模拟环境下也会返回模拟成交价）
+    fill_info = await _wait_filled(trd_ctx, order_id)
+
     return {
-      "success": False,
-      "error": str(data),
+        "success": True,
+        "order_id": order_id,
+        "filled_price": fill_info["filled_price"],
+        "filled_qty": fill_info["filled_qty"],
     }
-
-  row = data.iloc[0]
-  order_id = row["order_id"]
-
-  return {
-    "success": True,
-    "order_id": order_id,
-    "filled_price": row.get("dealt_avg_price", 0) or row.get("price", 0),
-    "filled_qty": row.get("dealt_qty", 0),
-  }
 
 
 class NightlyExecutor:
