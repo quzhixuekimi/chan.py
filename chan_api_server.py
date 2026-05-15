@@ -11,6 +11,8 @@ import pandas as pd
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from datetime import date
+from db import engine, get_cached, set_cached
 
 from indicators_api import router as indicators_router
 from backtest_api import router as backtest_router
@@ -985,7 +987,15 @@ def analyze_chan(req: ChanAnalyzeRequest):
   try:
     code = _normalize_stock_code(req.code)
     level = req.level
+    today = date.today()
 
+    # ---- 1️⃣ DB cache lookup ----
+    with engine.connect() as conn:
+      cached = get_cached(conn, code, level, "analyze", today)
+      if cached is not None:
+        return ChanAnalyzeResponse(**cached)
+
+    # ---- 2️⃣ 原有流程（若未命中） ----
     if level == "1D":
       csv_path = get_or_build_1d_csv(code)
     else:
@@ -993,12 +1003,13 @@ def analyze_chan(req: ChanAnalyzeRequest):
       csv_path = cache_map[level]
 
     data = extract_chan_data(code, level, csv_path)
+    response = ChanAnalyzeResponse(code=0, message="ok", data=data)
 
-    return ChanAnalyzeResponse(
-      code=0,
-      message="ok",
-      data=data,
-    )
+    # ---- 3️⃣ 写入缓存 ----
+    with engine.begin() as conn:
+      set_cached(conn, code, level, "analyze", today, response.dict())
+
+    return response
 
   except Exception as e:
     import traceback
