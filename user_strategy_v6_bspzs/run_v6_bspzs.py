@@ -1315,7 +1315,7 @@ def main() -> None:
 
       symbol_last_digest_df = build_last_digest_by_symbol(
         symbol_last_df,
-        freshdays=5,
+        freshdays=2,
         reference_date=symbol_reference_date,
       )
       symbol_trading_digest_df = filter_trading_digest(symbol_last_digest_df)
@@ -1360,7 +1360,7 @@ def main() -> None:
 
     market_last_digest_df = build_last_digest_by_symbol(
       market_last_df,
-      freshdays=5,
+      freshdays=2,
       reference_date=global_reference_date,
     )
     market_trading_digest_df = filter_trading_digest(market_last_digest_df)
