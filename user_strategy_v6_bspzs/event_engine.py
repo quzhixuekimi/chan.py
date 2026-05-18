@@ -494,9 +494,10 @@ def build_last_digest_by_symbol(
   x["latest_event_time_dt"] = pd.to_datetime(x["latest_event_time"], errors="coerce")
 
   rows = []
+  today_dt = pd.Timestamp("today")
   for symbol, g in x.groupby("symbol", sort=True):
     item = {"symbol": symbol}
-    reference_date_dt = g["event_date_dt"].max()
+    reference_date_dt = today_dt
     reference_date = (
       reference_date_dt.strftime("%Y-%m-%d") if pd.notna(reference_date_dt) else ""
     )

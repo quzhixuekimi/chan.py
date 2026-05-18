@@ -558,7 +558,7 @@ def build_last_digest_by_symbol(
     reference_date = ref_str_map.get(symbol, "")
 
     if pd.isna(reference_date_dt) or not reference_date:
-      reference_date_dt = g["event_date_dt"].max()
+      reference_date_dt = pd.Timestamp("today")
       reference_date = (
         reference_date_dt.strftime("%Y/%m/%d") if pd.notna(reference_date_dt) else ""
       )
