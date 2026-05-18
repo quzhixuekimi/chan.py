@@ -380,6 +380,7 @@ def build_last_digest_by_symbol(
 
   timeframe_order = ["1d", "4h", "2h", "1h", "30m", "15m"]
   trading_event_types = {
+    "ZS_FORMED",
     "BSP1_BUY",
     "BSP1_SELL",
     "BSP2_BUY",
@@ -1310,15 +1311,11 @@ def main() -> None:
       symbol_readable_df = build_readable_signal_events(all_symbol_signal_events_df)
       symbol_last_df = build_last_events_per_symbol_timeframe(symbol_readable_df)
 
-      symbol_reference_date = None
-      if not symbol_last_df.empty and "eventdate" in symbol_last_df.columns:
-        tmp_ref = pd.to_datetime(symbol_last_df["eventdate"], errors="coerce").max()
-        if pd.notna(tmp_ref):
-          symbol_reference_date = tmp_ref.strftime("%Y-%m-%d")
+      symbol_reference_date = pd.Timestamp("today").strftime("%Y-%m-%d")
 
       symbol_last_digest_df = build_last_digest_by_symbol(
         symbol_last_df,
-        freshdays=2,
+        freshdays=5,
         reference_date=symbol_reference_date,
       )
       symbol_trading_digest_df = filter_trading_digest(symbol_last_digest_df)
@@ -1359,15 +1356,11 @@ def main() -> None:
     market_readable_df = build_readable_signal_events(market_all_signal_events_df)
     market_last_df = build_last_events_per_symbol_timeframe(market_readable_df)
 
-    global_reference_date = None
-    if not market_last_df.empty and "eventdate" in market_last_df.columns:
-      tmp_ref = pd.to_datetime(market_last_df["eventdate"], errors="coerce").max()
-      if pd.notna(tmp_ref):
-        global_reference_date = tmp_ref.strftime("%Y-%m-%d")
+    global_reference_date = pd.Timestamp("today").strftime("%Y-%m-%d")
 
     market_last_digest_df = build_last_digest_by_symbol(
       market_last_df,
-      freshdays=10,
+      freshdays=5,
       reference_date=global_reference_date,
     )
     market_trading_digest_df = filter_trading_digest(market_last_digest_df)

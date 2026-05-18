@@ -135,8 +135,6 @@ class BiBacktester:
 
   def _find_next_confirmed_down_bi(self, current_bi_id: Any, current_end_index: int | None) -> Optional[Dict[str, Any]]:
     for next_bi in self.bi_list:
-      if not next_bi.get("is_sure", True):
-        continue
       if next_bi.get("direction") != "down":
         continue
       next_bi_id = next_bi.get("bi_id")
