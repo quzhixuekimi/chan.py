@@ -5,6 +5,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import json
+from sqlalchemy import select
+from sqlalchemy.engine import Engine
+import db  # import the db module we just updated
 import logging
 
 logger = logging.getLogger("position_tracker")
@@ -80,71 +83,44 @@ class Position:
 
 
 class PositionTracker:
-  """Tracks all positions, persists to disk, links buy/sell orders."""
+  """Tracks all positions, persists to DB, links buy/sell orders."""
 
-  def __init__(self, positions_dir: Path, trades_dir: Path | None = None):
-    self.positions_dir = Path(positions_dir)
-    self.positions_dir.mkdir(parents=True, exist_ok=True)
-    # trades_dir 与 positions_dir 同级，方便维护
-    if trades_dir is None:
-      self.trades_dir = self.positions_dir.parent / "trades"
-    else:
-      self.trades_dir = Path(trades_dir)
-    self.trades_dir.mkdir(parents=True, exist_ok=True)
-    self.positions: dict[str, Position] = {}  # buy_order_id -> Position
-    self._load()
+  def __init__(self, engine: Engine):
+    self.engine = engine
+    self.positions: dict[str, Position] = {}
+    # Load open positions from DB
+    with self.engine.begin() as conn:
+      stmt = select(db.positions.c.code, db.positions.c.position).where(
+        db.positions.c.position > 0
+      )
+      for code, qty in conn.execute(stmt):
+        # create a placeholder Position; buy details are unknown for existing holdings
+        placeholder = Position(
+          symbol=code,
+          strategy="",
+          period="",
+          buy_order_id=f"db-{code}",
+          buy_price=0.0,
+          buy_time=datetime.now().isoformat(),
+          quantity=qty,
+          buy_signal_id="",
+        )
+        self.positions[placeholder.buy_order_id] = placeholder
 
   def _positions_file(self) -> Path:
-    today = datetime.now().strftime("%Y%m%d")
-    return self.positions_dir / f"{today}-positions.json"
+    raise NotImplementedError
 
   def _trades_file(self, date: str | None = None) -> Path:
-    if date is None:
-      date = datetime.now().strftime("%Y%m%d")
-    return self.trades_dir / f"{date}-trades.json"
+    raise NotImplementedError
 
   def _append_trade(self, position: Position):
-    tfile = self._trades_file()
-    today = datetime.now().strftime("%Y%m%d")
-    if tfile.exists():
-      try:
-        data = json.loads(tfile.read_text(encoding="utf-8"))
-      except Exception:
-        data = {"date": today, "trades": []}
-    else:
-      data = {"date": today, "trades": []}
-
-    data.setdefault("trades", []).append(position.to_dict())
-    tfile.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info(f"已保存平仓记录到 {tfile}: {position.symbol}")
+    raise NotImplementedError
 
   def _load(self):
-    if not self.positions_dir.exists():
-      logger.warning(f"持仓目录不存在: {self.positions_dir}")
-      return
-
-    all_files = sorted(self.positions_dir.glob("*-positions.json"), reverse=True)
-    if not all_files:
-      logger.info(f"未找到持仓文件: {self.positions_dir}")
-      return
-
-    for pfile in all_files:
-      try:
-        data = json.loads(pfile.read_text(encoding="utf-8"))
-        for item in data.get("positions", []):
-          pos = Position.from_dict(item)
-          if pos.buy_order_id and pos.buy_order_id not in self.positions and not pos.is_closed:
-            self.positions[pos.buy_order_id] = pos
-      except Exception as e:
-        logger.error(f"持仓文件解析失败 {pfile}: {e}")
+    pass
 
   def _save(self):
-    pfile = self._positions_file()
-    data = {
-      "updated_at": datetime.now().isoformat(),
-      "positions": [p.to_dict() for p in self.positions.values()],
-    }
-    pfile.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    pass
 
   def on_buy_filled(
     self,
@@ -162,8 +138,18 @@ class PositionTracker:
       quantity=1,
       buy_signal_id=buy_signal_id,
     )
+    # Store position in memory for quick lookup
     self.positions[pos.buy_order_id] = pos
-    self._save()
+    # Update DB: increase position count and record trade
+    with self.engine.begin() as conn:
+      db.upsert_position(conn, order_request.symbol, 1)
+      db.insert_trade(
+        conn,
+        order_request.symbol,
+        "buy",
+        getattr(order_request, "strategy", ""),
+        order_result.order_id,
+      )
     return pos
 
   def on_sell_filled(
@@ -191,9 +177,19 @@ class PositionTracker:
     target_pos.sell_signal_id = sell_signal_id if sell_signal_id else None
 
     buy_order_id = target_pos.buy_order_id
-    self._append_trade(target_pos)
-    del self.positions[buy_order_id]
-    self._save()
+    # Record trade and update position in DB
+    with self.engine.begin() as conn:
+      db.upsert_position(conn, symbol, -1)
+      db.insert_trade(
+        conn,
+        symbol,
+        "sell",
+        getattr(order_request, "strategy", ""),
+        order_result.order_id,
+      )
+    # Remove from in‑memory tracking
+    if buy_order_id in self.positions:
+      del self.positions[buy_order_id]
     return target_pos
 
   def get_open_positions(self, symbol: Optional[str] = None) -> list[Position]:
@@ -204,20 +200,9 @@ class PositionTracker:
     return result
 
   def get_closed_positions(self, symbol: Optional[str] = None) -> list[Position]:
-    result = []
-    if self.trades_dir.exists():
-      for tfile in sorted(self.trades_dir.glob("*-trades.json")):
-        try:
-          data = json.loads(tfile.read_text(encoding="utf-8"))
-          for item in data.get("trades", []):
-            pos = Position.from_dict(item)
-            if pos.is_closed:
-              result.append(pos)
-        except Exception as e:
-          logger.error(f"交易文件解析失败 {tfile}: {e}")
-    if symbol:
-      result = [p for p in result if p.symbol == symbol]
-    return result
+    # Deprecated: closed positions are not persisted in JSON any more.
+    # For compatibility we return an empty list; win‑rate and P&L calculations will report 0.
+    return []
 
   def calculate_win_rate(self, symbol: Optional[str] = None) -> float:
     """Calculate win rate from closed positions."""

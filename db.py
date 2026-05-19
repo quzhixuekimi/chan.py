@@ -18,6 +18,7 @@ from sqlalchemy import (
   text,
 )
 from sqlalchemy.engine import Engine
+import logging
 
 # ---------------------------------------------------------------------------
 # 读取数据库 URL（系统环境变量）
@@ -39,6 +40,43 @@ engine: Engine = create_engine(
 )
 
 metadata = MetaData()
+
+# ---------------------------------------------------------------------------
+# 新增表：positions 与 trades（持仓与交易记录）
+# ---------------------------------------------------------------------------
+positions = Table(
+  "positions",
+  metadata,
+  Column("id", BigInteger, primary_key=True, autoincrement=True),
+  Column("code", Text, nullable=False),
+  Column("position", BigInteger, default=0, nullable=False),
+  Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),
+  Column(
+    "updated_at",
+    TIMESTAMP(timezone=True),
+    server_default=text("now()"),
+    onupdate=text("now()"),
+  ),
+  UniqueConstraint("code", name="unique_code_position"),
+)
+
+trades = Table(
+  "trades",
+  metadata,
+  Column("id", BigInteger, primary_key=True, autoincrement=True),
+  Column("code", Text, nullable=False),
+  Column("action", Text, nullable=False),  # buy or sell
+  Column("strategy", Text, nullable=False),
+  Column("order_id", Text, nullable=False),
+  Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),
+  Column(
+    "updated_at",
+    TIMESTAMP(timezone=True),
+    server_default=text("now()"),
+    onupdate=text("now()"),
+  ),
+  UniqueConstraint("code", "action", "strategy", "order_id", name="unique_code_trades"),
+)
 
 # ---------------------------------------------------------------------------
 # 表定义（保持与数据库中 CREATE TABLE 语句一致）
@@ -121,4 +159,66 @@ def set_cached(conn, code: str, level: str, endpoint: str, today: date, content_
 def delete_old_cache(conn, keep_date: date):
   """删除早于 keep_date 的缓存（可在每日调度后调用）"""
   stmt = api_response_cache.delete().where(api_response_cache.c.today < keep_date)
+  conn.execute(stmt)
+
+
+# ---------------------------------------------------------------------------
+# Positions & Trades helpers
+# ---------------------------------------------------------------------------
+
+
+def get_position(conn, code: str):
+  """返回给定 code 的持仓记录（如果不存在返回 None）"""
+  stmt = select(positions.c.position).where(positions.c.code == code)
+  result = conn.execute(stmt).first()
+  return result[0] if result else None
+
+
+def upsert_position(conn, code: str, delta: int):
+  """根据 delta（正数增仓，负数减仓）更新或插入持仓记录。
+  若记录不存在且 delta 为正，则插入新记录；若 delta 为负且记录不存在则不操作。
+  返回更新后的持仓数量（>=0）。"""
+  # 使用 PostgreSQL 的 INSERT ... ON CONFLICT
+  from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+  if delta >= 0:
+    stmt = (
+      pg_insert(positions)
+      .values(code=code, position=delta)
+      .on_conflict_do_update(
+        index_elements=["code"],
+        set_={"position": positions.c.position + delta, "updated_at": text("now()")},
+      )
+    )
+    conn.execute(stmt)
+  else:
+    # 对已有记录减仓
+    current = get_position(conn, code)
+    if current is None:
+      return 0
+    new_val = max(0, current + delta)
+    stmt = (
+      positions.update()
+      .where(positions.c.code == code)
+      .values(position=new_val, updated_at=text("now()"))
+    )
+    conn.execute(stmt)
+  # 返回最新值
+  return get_position(conn, code)
+
+
+def insert_trade(conn, code: str, action: str, strategy: str, order_id: str):
+  """在 trades 表中插入一条记录。若同一 (code, action, strategy, order_id) 已存在则忽略（避免唯一约束冲突）。"""
+  from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+  stmt = (
+    pg_insert(trades)
+    .values(
+      code=code,
+      action=action,
+      strategy=strategy,
+      order_id=order_id,
+    )
+    .on_conflict_do_nothing(index_elements=["code", "action", "strategy", "order_id"])
+  )
   conn.execute(stmt)

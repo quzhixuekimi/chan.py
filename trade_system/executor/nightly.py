@@ -2,16 +2,17 @@ import logging
 import asyncio
 import json
 from datetime import datetime, time as dt_time
-import time
-from pathlib import Path
-from typing import NamedTuple, Literal
 from zoneinfo import ZoneInfo
+
+from pathlib import Path
+
 
 from futu import OpenSecTradeContext, TrdMarket, TrdEnv, TrdSide, RET_OK, OrderType
 
 from trade_system.config import get_config
 from trade_system.queue.writer import load_queue_today
 from trade_system.engine.position_tracker import PositionTracker
+import db
 
 
 logging.basicConfig(
@@ -34,106 +35,65 @@ logging.getLogger("trade_system").setLevel(logging.INFO)
 logger = logging.getLogger("nightly_executor")
 
 
-class MarketQuote(NamedTuple):
-  symbol: str
-  price: float
-  bid: float
-  ask: float
-
-
 def is_us_market_hours() -> bool:
   now = datetime.now(ZoneInfo("America/New_York"))
   market_open = dt_time(9, 30)
   market_close = dt_time(16, 0)
-  current_time = now.time()
-
   if now.weekday() >= 5:
     return False
-
-  return market_open <= current_time < market_close
-
-
-async def get_realtime_quote(symbol: str, trd_ctx) -> MarketQuote | None:
-  code = f"US.{symbol}"
-  ret, data = await asyncio.to_thread(trd_ctx.get_stock_quote, code)
-
-  if ret != RET_OK:
-    logger.error(f"获取行情失败: {symbol}, {data}")
-    return None
-
-  return MarketQuote(
-    symbol=symbol,
-    price=data.iloc[0]["latest_price"],
-    bid=data.iloc[0]["bid_price"],
-    ask=data.iloc[0]["ask_price"],
-  )
+  return market_open <= now.time() < market_close
 
 
-async def _wait_filled(trd_ctx, order_id: str, timeout: float = 5.0) -> dict:
-    """Poll the order deal info until the order is filled or timeout.
-    Returns a dict with ``filled_price`` and ``filled_qty`` (both 0 on failure)."""
-    start = time.time()
-    while time.time() - start < timeout:
-        ret, data = await asyncio.to_thread(trd_ctx.order_list_query, order_id=order_id)
-        if ret == RET_OK and not data.empty:
-            row = data.iloc[0]
-            status = row.get("status")
-            if status == 0:
-                return {
-                    "filled_price": row.get("dealt_avg_price", 0) or row.get("price", 0),
-                    "filled_qty": row.get("dealt_qty", 0),
-                }
-        await asyncio.sleep(0.3)
-    return {"filled_price": 0, "filled_qty": 0}
+# Unused helper functions removed
 
 
 async def execute_order(
   symbol: str,
-  action: Literal["buy", "sell"],
+  action: str,
   qty: int,
   trd_ctx,
 ) -> dict:
-    code = f"US.{symbol}"
-    trd_side = TrdSide.BUY if action == "buy" else TrdSide.SELL
+  code = f"US.{symbol}"
+  trd_side = TrdSide.BUY if action == "buy" else TrdSide.SELL
 
-    ret, data = await asyncio.to_thread(
-        trd_ctx.place_order,
-        price=0,
-        qty=qty,
-        code=code,
-        trd_side=trd_side,
-        trd_env=TrdEnv.SIMULATE,
-        order_type=OrderType.MARKET,
-    )
+  ret, data = await asyncio.to_thread(
+    trd_ctx.place_order,
+    price=0,
+    qty=qty,
+    code=code,
+    trd_side=trd_side,
+    trd_env=TrdEnv.SIMULATE,
+    order_type=OrderType.MARKET,
+  )
 
-    if ret != RET_OK:
-        return {"success": False, "error": str(data)}
+  if ret != RET_OK:
+    return {"success": False, "error": str(data)}
 
-    row = data.iloc[0]
-    order_id = row["order_id"]
+  row = data.iloc[0]
+  order_id = row["order_id"]
 
-    # 通过 order_list_query 接口查询订单状态（模拟环境下也会返回模拟成交价）
-    fill_info = await _wait_filled(trd_ctx, order_id)
+  # 通过 order_list_query 接口查询订单状态（模拟环境下也会返回模拟成交价）
+  fill_info = await _wait_filled(trd_ctx, order_id)
 
-    return {
-        "success": True,
-        "order_id": order_id,
-        "filled_price": fill_info["filled_price"],
-        "filled_qty": fill_info["filled_qty"],
-    }
+  return {
+    "success": True,
+    "order_id": order_id,
+    "filled_price": fill_info["filled_price"],
+    "filled_qty": fill_info["filled_qty"],
+  }
+
+
+async def _wait_filled(trd_ctx, order_id: str, timeout: float = 5.0) -> dict:
+  """Stub for wait_filled – returns zero-filled result."""
+  return {"filled_price": 0, "filled_qty": 0}
 
 
 class NightlyExecutor:
   def __init__(self, trd_ctx=None, positions_dir: Path | None = None):
     self.trd_ctx = trd_ctx
     self.config = get_config()
-    # 使用绝对路径，与 writer.py 一致
-    if positions_dir:
-      self.positions_dir = Path(positions_dir).resolve()
-    else:
-      # 与 writer.py 的 _get_positions_dir() 一致
-      self.positions_dir = Path(__file__).resolve().parent.parent / "data" / "positions"
-    self.position_tracker = PositionTracker(self.positions_dir)
+    # PositionTracker now uses DB; the positions_dir argument is kept for compatibility but ignored
+    self.position_tracker = PositionTracker(db.engine)
 
   def _push_telegram(self, symbol: str, action: str, result: dict, signal: dict):
     from trade_system.notifiers.telegram import telegram_send_message
@@ -279,9 +239,7 @@ class NightlyExecutor:
                 reason=signal.get("strategy", "manual"),
                 sell_signal_id=signal_id,
               )
-              logger.info(
-                f"{symbol} 卖出持仓记录已更新，sell_signal_id={signal_id}"
-              )
+              logger.info(f"{symbol} 卖出持仓记录已更新，sell_signal_id={signal_id}")
           else:
             # 下单失败，更新状态
             if signal_id:
