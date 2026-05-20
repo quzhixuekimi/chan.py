@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from datetime import date
 import logging
-from db import engine, get_cached, set_cached
+from db import engine, get_cached, set_cached, delete_old_cache_for_code
 
 router = APIRouter()
 
@@ -71,11 +71,7 @@ def _safe_filename_part(value: str | None) -> str:
     return "none"
   # Replace unsafe characters and also strip dot separators used in stock codes
   return (
-    str(value)
-    .replace("/", "-")
-    .replace(":", "_")
-    .replace(".", "_")
-    .replace(" ", "_")
+    str(value).replace("/", "-").replace(":", "_").replace(".", "_").replace(" ", "_")
   )
 
 
@@ -315,30 +311,37 @@ def indicators_health():
 
 @router.post("/api/chan/indicators", response_model=IndicatorsResponse)
 def get_indicators(req: IndicatorsRequest):
-    logging.getLogger('indicators').info('Received /api/chan/indicators request code=%s level=%s', req.code, req.level)
-    try:
-        code = _normalize_stock_code(req.code)
-        level = req.level
-        today = date.today()
-        # ---- 1️⃣ DB cache lookup ----
-        with engine.connect() as conn:
-            cached = get_cached(conn, code, level, "indicators", today)
-            if cached is not None:
-                return IndicatorsResponse(**cached)
-        # ---- 2️⃣ 原有计算 ----
-        # ---- 2️⃣ 确保 data_cache 中有相应的 CSV（若不存在会自动下载） ----
-        if level == "1D":
-            from chan_api_server import get_or_build_1d_csv
-            _ = get_or_build_1d_csv(code)  # 只为确保文件存在
-        else:
-            from chan_api_server import ensure_intraday_day_cache
-            _ = ensure_intraday_day_cache(code, [level])  # 返回 dict，确保对应 level 已生成
-        # ---- 3️⃣ 原有计算 ----
-        data = _build_indicators(code, level)
-        response = IndicatorsResponse(code=0, message="ok", data=data)
-        # ---- 3️⃣ 写入缓存 ----
-        with engine.begin() as conn:
-            set_cached(conn, code, level, "indicators", today, response.dict())
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+  logging.getLogger("indicators").info(
+    "Received /api/chan/indicators request code=%s level=%s", req.code, req.level
+  )
+  try:
+    code = _normalize_stock_code(req.code)
+    level = req.level
+    today = date.today()
+    # ---- 1️⃣ DB cache lookup ----
+    with engine.connect() as conn:
+      cached = get_cached(conn, code, level, "indicators", today)
+      if cached is not None:
+        return IndicatorsResponse(**cached)
+    # Delete old cache entries for this code before calculating new data
+    with engine.begin() as conn:
+      delete_old_cache_for_code(conn, code, today)
+    # ---- 2️⃣ 原有计算 ----
+    # ---- 2️⃣ 确保 data_cache 中有相应的 CSV（若不存在会自动下载） ----
+    if level == "1D":
+      from chan_api_server import get_or_build_1d_csv
+
+      _ = get_or_build_1d_csv(code)  # 只为确保文件存在
+    else:
+      from chan_api_server import ensure_intraday_day_cache
+
+      _ = ensure_intraday_day_cache(code, [level])  # 返回 dict，确保对应 level 已生成
+    # ---- 3️⃣ 原有计算 ----
+    data = _build_indicators(code, level)
+    response = IndicatorsResponse(code=0, message="ok", data=data)
+    # ---- 3️⃣ 写入缓存 ----
+    with engine.begin() as conn:
+      set_cached(conn, code, level, "indicators", today, response.dict())
+    return response
+  except Exception as e:
+    raise HTTPException(status_code=500, detail=str(e))

@@ -118,20 +118,19 @@ def get_cached(conn, code: str, level: str, endpoint: str, today: date):
 import logging
 
 
+def delete_old_cache_for_code(conn, code: str, today: date):
+  """删除指定 code 中早于 today 的缓存记录（每天首次调用 API 时执行一次）"""
+  stmt = api_response_cache.delete().where(
+    api_response_cache.c.code == code,
+    api_response_cache.c.today < today,
+  )
+  conn.execute(stmt)
+
+
 def set_cached(conn, code: str, level: str, endpoint: str, today: date, content_json):
-  """使用 ON CONFLICT 更新或插入缓存记录，并自动清理过期数据（1天前）"""
+  """使用 ON CONFLICT 更新或插入缓存记录"""
   from datetime import timedelta
   from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-  # Use the actual current date to determine the 1‑day cutoff
-  cutoff = today - timedelta(days=1)
-  delete_stmt = api_response_cache.delete().where(
-    api_response_cache.c.code == code,
-    api_response_cache.c.level == level,
-    api_response_cache.c.endpoint == endpoint,
-    api_response_cache.c.today <= cutoff,
-  )
-  conn.execute(delete_stmt)
 
   stmt = (
     pg_insert(api_response_cache)
@@ -154,12 +153,6 @@ def set_cached(conn, code: str, level: str, endpoint: str, today: date, content_
     conn.execute(stmt)
   except Exception as e:
     logging.getLogger("chan_api_server").error("Cache write error: %s", e)
-
-
-def delete_old_cache(conn, keep_date: date):
-  """删除早于 keep_date 的缓存（可在每日调度后调用）"""
-  stmt = api_response_cache.delete().where(api_response_cache.c.today < keep_date)
-  conn.execute(stmt)
 
 
 # ---------------------------------------------------------------------------
