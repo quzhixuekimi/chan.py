@@ -63,13 +63,23 @@ def is_us_market_hours() -> bool:
       end = (now + timedelta(days=1)).date()
       schedule = nyse.schedule(start_date=start, end_date=end)
       # schedule.index are Timestamps; check whether today's date is present
-      today_str = now.date().isoformat()
-      if today_str not in schedule.index.format():
+      # schedule.index contains Timestamps; check whether any index has today's date
+      today_date = now.date()
+      matches = [idx for idx in schedule.index if getattr(idx, "date", lambda: None)() == today_date]
+      if not matches:
         return False
       # use the schedule's market open/close for today for correctness
-      day_schedule = schedule.loc[today_str]
-      market_open_dt = day_schedule["market_open"].tz_convert("America/New_York").to_pydatetime()
-      market_close_dt = day_schedule["market_close"].tz_convert("America/New_York").to_pydatetime()
+      day_idx = matches[0]
+      day_schedule = schedule.loc[day_idx]
+      market_open_ts = day_schedule["market_open"]
+      market_close_ts = day_schedule["market_close"]
+      # ensure timestamps are in America/New_York tz and compare with now
+      try:
+        market_open_dt = market_open_ts.tz_convert("America/New_York").to_pydatetime()
+        market_close_dt = market_close_ts.tz_convert("America/New_York").to_pydatetime()
+      except Exception:
+        market_open_dt = market_open_ts.to_pydatetime()
+        market_close_dt = market_close_ts.to_pydatetime()
       return market_open_dt <= now < market_close_dt
     except Exception as e:
       # If any error occurs while checking calendar, log and fallback to time-only check
@@ -93,6 +103,7 @@ async def execute_order(
   code = f"US.{symbol}"
   trd_side = TrdSide.BUY if action == "buy" else TrdSide.SELL
 
+  # Place order (blocking SDK call moved to thread)
   ret, data = await asyncio.to_thread(
     trd_ctx.place_order,
     price=0,
@@ -106,23 +117,105 @@ async def execute_order(
   if ret != RET_OK:
     return {"success": False, "error": str(data)}
 
-  row = data.iloc[0]
-  order_id = row["order_id"]
+  # Try to extract order_id from place_order return
+  order_id = None
+  try:
+    # handle DataFrame-like
+    if hasattr(data, "iloc"):
+      row = data.iloc[0]
+      order_id = row.get("order_id") if hasattr(row, "get") else row["order_id"]
+    else:
+      order_id = getattr(data, "order_id", None)
+  except Exception:
+    try:
+      # fallback for list/tuple
+      order_id = data[0]["order_id"] if isinstance(data, (list, tuple)) and data else None
+    except Exception:
+      order_id = None
 
-  # 通过 order_list_query 接口查询订单状态（模拟环境下也会返回模拟成交价）
+  if not order_id:
+    return {"success": False, "error": "no_order_id_returned"}
+
+  # Poll order status to obtain real filled_qty / filled_price
   fill_info = await _wait_filled(trd_ctx, order_id)
 
+  success = False
+  if fill_info.get("status") == "filled" and int(fill_info.get("filled_qty", 0)) > 0:
+    success = True
+
   return {
-    "success": True,
+    "success": success,
     "order_id": order_id,
-    "filled_price": fill_info["filled_price"],
-    "filled_qty": fill_info["filled_qty"],
+    "filled_price": float(fill_info.get("filled_price", 0) or 0),
+    "filled_qty": int(fill_info.get("filled_qty", 0) or 0),
+    "raw_fill_status": fill_info,
   }
 
 
-async def _wait_filled(trd_ctx, order_id: str, timeout: float = 5.0) -> dict:
-  """Stub for wait_filled – returns zero-filled result."""
-  return {"filled_price": 0, "filled_qty": 0}
+async def _wait_filled(
+  trd_ctx,
+  order_id: str,
+  timeout: float = 30.0,
+  poll_interval: float = 3.0,
+  per_call_timeout: float = 3.0,
+) -> dict:
+  """Poll order status via trd_ctx.order_list_query (or similar) until filled or timeout.
+
+  Returns dict with keys: filled_qty (int), filled_price (float), status (filled|open|rejected|timeout|error),
+  and optional error.
+  """
+  import time
+
+  start = time.time()
+  while True:
+    try:
+      # trd_ctx.order_list_query is synchronous in futu SDK; run in thread
+      # protect each SDK call with a per-call timeout to avoid indefinite blocking
+      try:
+        coro = asyncio.to_thread(trd_ctx.order_list_query, order_id=order_id)
+        ret, df = await asyncio.wait_for(coro, timeout=per_call_timeout)
+      except asyncio.TimeoutError:
+        # per-call timeout reached; treat as transient and continue until overall timeout
+        if (time.time() - start) >= float(timeout):
+          return {"filled_qty": 0, "filled_price": 0, "status": "timeout"}
+        await asyncio.sleep(poll_interval)
+        continue
+    except Exception as e:
+      return {"filled_qty": 0, "filled_price": 0, "status": "error", "error": str(e)}
+
+    if ret != RET_OK:
+      # API error, return with error status
+      return {"filled_qty": 0, "filled_price": 0, "status": "error", "error": str(df)}
+
+    # df is expected to be a DataFrame-like result; parse defensively
+    try:
+      if hasattr(df, "empty") and not df.empty:
+        row = df.iloc[0]
+        # candidate fields for filled qty
+        filled_qty = int(
+          (row.get("filled_qty") or row.get("fill_qty") or row.get("filled_volume") or row.get("qty_filled") or row.get("qty") or 0)
+        )
+        # candidate fields for filled price
+        filled_price = float(
+          (row.get("filled_price") or row.get("avg_price") or row.get("filled_avg_price") or row.get("deal_avg_price") or 0) or 0
+        )
+        status_field = (row.get("order_status") or row.get("status") or "").lower()
+
+        if filled_qty > 0:
+          return {"filled_qty": filled_qty, "filled_price": filled_price, "status": "filled"}
+
+        # If order is rejected/cancelled, return as rejected
+        if any(x in status_field for x in ("reject", "rejected", "cancel", "cancelled", "failed")):
+          return {"filled_qty": 0, "filled_price": 0, "status": "rejected"}
+
+    except Exception:
+      # If parsing fails, continue to polling until timeout
+      pass
+
+    if (time.time() - start) >= float(timeout):
+      return {"filled_qty": 0, "filled_price": 0, "status": "timeout"}
+
+    await asyncio.sleep(poll_interval)
 
 
 class NightlyExecutor:

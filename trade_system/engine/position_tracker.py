@@ -128,6 +128,11 @@ class PositionTracker:
     order_result,
     buy_signal_id: str = "",
   ) -> Position:
+    # Use actual filled quantity from order_result when available
+    filled_qty = int(getattr(order_result, "filled_qty", 0) or 0)
+    if filled_qty <= 0:
+      filled_qty = 1  # fallback to 1 for backward compatibility
+
     pos = Position(
       symbol=order_request.symbol,
       strategy=getattr(order_request, "strategy", "unknown"),
@@ -135,14 +140,14 @@ class PositionTracker:
       buy_order_id=order_result.order_id,
       buy_price=order_result.filled_price,
       buy_time=datetime.now().isoformat(),
-      quantity=1,
+      quantity=filled_qty,
       buy_signal_id=buy_signal_id,
     )
     # Store position in memory for quick lookup
     self.positions[pos.buy_order_id] = pos
     # Update DB: increase position count and record trade
     with self.engine.begin() as conn:
-      db.upsert_position(conn, order_request.symbol, 1)
+      db.upsert_position(conn, order_request.symbol, filled_qty)
       db.insert_trade(
         conn,
         order_request.symbol,
@@ -178,8 +183,13 @@ class PositionTracker:
 
     buy_order_id = target_pos.buy_order_id
     # Record trade and update position in DB
+    # decrement by actual sold quantity when available
+    sold_qty = int(getattr(order_result, "filled_qty", 0) or 0)
+    if sold_qty <= 0:
+      sold_qty = 1
+
     with self.engine.begin() as conn:
-      db.upsert_position(conn, symbol, -1)
+      db.upsert_position(conn, symbol, -sold_qty)
       db.insert_trade(
         conn,
         symbol,
