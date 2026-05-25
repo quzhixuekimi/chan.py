@@ -1,8 +1,18 @@
 import logging
 import asyncio
 import json
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
+import logging
+
+_HAS_PMC = True
+try:
+  import pandas_market_calendars as mcal
+except Exception:  # pragma: no cover - optional dependency
+  _HAS_PMC = False
+  logging.getLogger("nightly_executor").warning(
+    "pandas_market_calendars not available; holiday checks will be disabled"
+  )
 
 from pathlib import Path
 
@@ -39,8 +49,35 @@ def is_us_market_hours() -> bool:
   now = datetime.now(ZoneInfo("America/New_York"))
   market_open = dt_time(9, 30)
   market_close = dt_time(16, 0)
+
+  # Weekend check remains
   if now.weekday() >= 5:
     return False
+
+  # If pandas_market_calendars is available, also ensure today is a trading day
+  if _HAS_PMC:
+    try:
+      nyse = mcal.get_calendar("NYSE")
+      # Query schedule for a 3-day window to be safe around midnight boundaries
+      start = (now - timedelta(days=1)).date()
+      end = (now + timedelta(days=1)).date()
+      schedule = nyse.schedule(start_date=start, end_date=end)
+      # schedule.index are Timestamps; check whether today's date is present
+      today_str = now.date().isoformat()
+      if today_str not in schedule.index.format():
+        return False
+      # use the schedule's market open/close for today for correctness
+      day_schedule = schedule.loc[today_str]
+      market_open_dt = day_schedule["market_open"].tz_convert("America/New_York").to_pydatetime()
+      market_close_dt = day_schedule["market_close"].tz_convert("America/New_York").to_pydatetime()
+      return market_open_dt <= now < market_close_dt
+    except Exception as e:
+      # If any error occurs while checking calendar, log and fallback to time-only check
+      logging.getLogger("nightly_executor").exception(
+        "Error checking market calendar; falling back to time-only check: %s", e
+      )
+
+  # Fallback: simple time window
   return market_open <= now.time() < market_close
 
 
