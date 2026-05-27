@@ -308,13 +308,25 @@ def write_queue_from_digest(digest_csv: Path, output_path: Path | None = None) -
     if signal:
       queue_data["signals"].append(signal._asdict())
 
-  if output_path is None:
-    today = datetime.now().strftime("%Y%m%d")
-    output_path = _get_queue_dir() / f"{today}-queue.json"
+  # Persist into database instead of writing a JSON file
+  try:
+    import db
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
 
-  output_path.parent.mkdir(parents=True, exist_ok=True)
-  output_path.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2))
-  return output_path
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    # upsert using db helper
+    with db.engine.begin() as conn:
+      db.upsert_queue_for_date(conn, today, queue_data["signals"])
+    return None
+  except Exception:
+    # fallback: write file if DB unavailable
+    if output_path is None:
+      today = datetime.now().strftime("%Y%m%d")
+      output_path = _get_queue_dir() / f"{today}-queue.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2))
+    return output_path
 
 
 def write_queue_from_multiple_digests(
@@ -380,13 +392,24 @@ def write_queue_from_multiple_digests(
     if signal:
       queue_data["signals"].append(signal._asdict())
 
-  if output_path is None:
-    today = datetime.now().strftime("%Y%m%d")
-    output_path = _get_queue_dir() / f"{today}-queue.json"
+  # Persist into database instead of writing a JSON file
+  try:
+    import db
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
 
-  output_path.parent.mkdir(parents=True, exist_ok=True)
-  output_path.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2))
-  return output_path
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    with db.engine.begin() as conn:
+      db.upsert_queue_for_date(conn, today, queue_data["signals"])
+    return None
+  except Exception:
+    # fallback: write file if DB unavailable
+    if output_path is None:
+      today = datetime.now().strftime("%Y%m%d")
+      output_path = _get_queue_dir() / f"{today}-queue.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2))
+    return output_path
 
 
 def load_queue_today() -> dict:

@@ -20,7 +20,7 @@ from pathlib import Path
 from futu import OpenSecTradeContext, TrdMarket, TrdEnv, TrdSide, RET_OK, OrderType
 
 from trade_system.config import get_config
-from trade_system.queue.writer import load_queue_today
+import db
 from trade_system.engine.position_tracker import PositionTracker
 import db
 
@@ -65,7 +65,11 @@ def is_us_market_hours() -> bool:
       # schedule.index are Timestamps; check whether today's date is present
       # schedule.index contains Timestamps; check whether any index has today's date
       today_date = now.date()
-      matches = [idx for idx in schedule.index if getattr(idx, "date", lambda: None)() == today_date]
+      matches = [
+        idx
+        for idx in schedule.index
+        if getattr(idx, "date", lambda: None)() == today_date
+      ]
       if not matches:
         return False
       # use the schedule's market open/close for today for correctness
@@ -129,7 +133,9 @@ async def execute_order(
   except Exception:
     try:
       # fallback for list/tuple
-      order_id = data[0]["order_id"] if isinstance(data, (list, tuple)) and data else None
+      order_id = (
+        data[0]["order_id"] if isinstance(data, (list, tuple)) and data else None
+      )
     except Exception:
       order_id = None
 
@@ -198,19 +204,40 @@ async def _wait_filled(
         row = df.iloc[0]
         # candidate fields for filled qty
         filled_qty = int(
-          (row.get("filled_qty") or row.get("fill_qty") or row.get("filled_volume") or row.get("qty_filled") or row.get("qty") or 0)
+          (
+            row.get("filled_qty")
+            or row.get("fill_qty")
+            or row.get("filled_volume")
+            or row.get("qty_filled")
+            or row.get("qty")
+            or 0
+          )
         )
         # candidate fields for filled price
         filled_price = float(
-          (row.get("filled_price") or row.get("avg_price") or row.get("filled_avg_price") or row.get("deal_avg_price") or 0) or 0
+          (
+            row.get("filled_price")
+            or row.get("avg_price")
+            or row.get("filled_avg_price")
+            or row.get("deal_avg_price")
+            or 0
+          )
+          or 0
         )
         status_field = (row.get("order_status") or row.get("status") or "").lower()
 
         if filled_qty > 0:
-          return {"filled_qty": filled_qty, "filled_price": filled_price, "status": "filled"}
+          return {
+            "filled_qty": filled_qty,
+            "filled_price": filled_price,
+            "status": "filled",
+          }
 
         # If order is rejected/cancelled, return as rejected
-        if any(x in status_field for x in ("reject", "rejected", "cancel", "cancelled", "failed")):
+        if any(
+          x in status_field
+          for x in ("reject", "rejected", "cancel", "cancelled", "failed")
+        ):
           return {"filled_qty": 0, "filled_price": 0, "status": "rejected"}
 
     except Exception:
@@ -253,7 +280,8 @@ class NightlyExecutor:
       logger.warning("美股市场未开放，跳过执行")
       return {"skipped": True, "reason": "us_market_closed"}
 
-    queue = load_queue_today()
+    # load queue from database (per-day)
+    queue = db.load_queue_today_from_db()
     logger.info(f"加载队列完成，signals数量: {len(queue.get('signals', []))}")
 
     if not queue.get("signals"):
@@ -383,19 +411,13 @@ class NightlyExecutor:
                   sig["status"] = "failed"
                   break
 
-        # 回写 queue.json，更新信号状态防止重复下单
-        try:
-          from trade_system.queue.writer import _get_queue_dir
-
-          today = datetime.now().strftime("%Y%m%d")
-          queue_path = _get_queue_dir() / f"{today}-queue.json"
-          queue_path.parent.mkdir(parents=True, exist_ok=True)
-          queue_path.write_text(
-            json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8"
-          )
-          logger.info(f"已回写队列状态: {queue_path}")
-        except Exception as e:
-          logger.exception(f"回写队列状态失败: {e}")
+          # 回写 queue.json，更新信号状态防止重复下单
+          try:
+            # write updated queue back to DB
+            db.write_queue_back_to_db(queue)
+            logger.info("已回写队列状态到数据库")
+          except Exception as e:
+            logger.exception(f"回写队列状态失败: {e}")
 
         return {"executed": results}
 

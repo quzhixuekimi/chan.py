@@ -18,7 +18,11 @@ from sqlalchemy import (
   text,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.dialects.postgresql import JSONB
 import logging
+from zoneinfo import ZoneInfo
+from datetime import datetime
+from datetime import date as _date
 
 # ---------------------------------------------------------------------------
 # 读取数据库 URL（系统环境变量）
@@ -93,6 +97,72 @@ api_response_cache = Table(
   Column("created_at", TIMESTAMP(timezone=True), server_default="now()"),
   UniqueConstraint("code", "level", "endpoint", "today", name="unique_cache"),
 )
+
+
+# ---------------------------------------------------------------------------
+# queue 表：每天一条生成的交易队列快照
+# ---------------------------------------------------------------------------
+queue = Table(
+  "queue",
+  metadata,
+  Column("id", BigInteger, primary_key=True, autoincrement=True),
+  Column("generated_at", TIMESTAMP(timezone=True), server_default=text("now()")),
+  Column("generated_date", Date, nullable=False),
+  Column("signals", JSONB, nullable=False),
+  Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),
+  UniqueConstraint("generated_date", name="unique_generated_date"),
+)
+
+
+# ---------------------------------------------------------------------------
+# Queue helpers
+# ---------------------------------------------------------------------------
+def get_queue_for_date(conn, generated_date: _date):
+  """返回指定日期的最新一条 queue 记录（signals, generated_at），不存在返回 None"""
+  stmt = (
+    select(queue.c.signals, queue.c.generated_at)
+    .where(queue.c.generated_date == generated_date)
+    .order_by(queue.c.id.desc())
+    .limit(1)
+  )
+  row = conn.execute(stmt).first()
+  return row
+
+
+def upsert_queue_for_date(conn, generated_date: _date, signals_json):
+  """使用 PostgreSQL 的 INSERT ... ON CONFLICT 按 generated_date upsert signals 字段"""
+  from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+  stmt = (
+    pg_insert(queue)
+    .values(generated_date=generated_date, signals=signals_json)
+    .on_conflict_do_update(
+      index_elements=["generated_date"],
+      set_={"signals": signals_json, "generated_at": text("now()")},
+    )
+  )
+  conn.execute(stmt)
+
+
+def load_queue_today_from_db():
+  """按 Asia/Shanghai 时区的日期读取今天的 queue（返回 dict 和原来 load_queue_today 的 shape 一致）"""
+  today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+  with engine.connect() as conn:
+    row = get_queue_for_date(conn, today)
+    if not row:
+      return {"generated_at": "", "signals": []}
+    signals, generated_at = row[0], row[1]
+    # signals 是 JSON 类型 -> Python 对象
+    return {"generated_at": generated_at.isoformat(), "signals": signals}
+
+
+def write_queue_back_to_db(queue_data: dict):
+  """把内存中的 queue dict 写回当天的 queue 表（按 Asia/Shanghai 的日期 upsert）"""
+  today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+  signals = queue_data.get("signals", [])
+  # 使用事务执行 upsert
+  with engine.begin() as conn:
+    upsert_queue_for_date(conn, today, signals)
 
 
 # ---------------------------------------------------------------------------
