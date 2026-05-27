@@ -74,3 +74,10 @@ websockets==16.0
 xlrd==2.0.2
 yfinance==1.2.0
 pandas-market-calendars
+
+# Added by dependency scan
+ccxt
+futu-api
+PyQt6
+pytest
+apscheduler
