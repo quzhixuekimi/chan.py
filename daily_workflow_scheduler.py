@@ -176,10 +176,10 @@ def run_analyze_step(config: WorkflowConfig) -> dict:
 
 def _push_queue_to_telegram(config: WorkflowConfig):
   try:
-    from trade_system.queue.writer import load_queue_today
+    import db
     from trade_system.notifiers.telegram import telegram_send_message
 
-    queue = load_queue_today()
+    queue = db.load_queue_today_from_db()
     signals = queue.get("signals", [])
     if not signals:
       return

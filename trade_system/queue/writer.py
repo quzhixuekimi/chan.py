@@ -311,11 +311,8 @@ def write_queue_from_digest(digest_csv: Path, output_path: Path | None = None) -
   # Persist into database instead of writing a JSON file
   try:
     import db
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
 
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
-    # upsert using db helper
     with db.engine.begin() as conn:
       db.upsert_queue_for_date(conn, today, queue_data["signals"])
     return None
@@ -395,8 +392,6 @@ def write_queue_from_multiple_digests(
   # Persist into database instead of writing a JSON file
   try:
     import db
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
 
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     with db.engine.begin() as conn:
