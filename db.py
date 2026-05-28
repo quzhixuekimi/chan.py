@@ -93,7 +93,7 @@ api_response_cache = Table(
   Column("level", Text, nullable=False),
   Column("endpoint", Text, nullable=False),
   Column("today", Date, nullable=False),
-  Column("content", JSON, nullable=False),
+  Column("content", JSONB, nullable=False),
   Column("created_at", TIMESTAMP(timezone=True), server_default="now()"),
   UniqueConstraint("code", "level", "endpoint", "today", name="unique_cache"),
 )
