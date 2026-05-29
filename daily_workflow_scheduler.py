@@ -35,6 +35,15 @@ DEFAULT_SYMBOLS = [
   "HOOD",
   "IONQ",
   "OKLO",
+  "SOXL",
+  "AMD",
+  "CRCL",
+  "HIMS",
+  "QUBT",
+  "MU",
+  "GOOG",
+  "AVGO",
+  "ORCL"
 ]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H", "30M", "15M"]
 
@@ -188,23 +197,26 @@ def _push_queue_to_telegram(config: WorkflowConfig):
     manual_count = sum(1 for s in signals if s.get("action") == "") + sum(
       1 for s in signals if s.get("action") == "manual_review"
     )
-    lines = [
-      f"📋 今日交易队列 ({queue.get('generated_at', '')[:10]})",
-      f"共 {len(signals)} 个信号",
-      f"买入: {buy_count} | 卖出: {sell_count} | 待人工: {manual_count}",
-      "",
-    ]
-    for sig in signals[:10]:
-      action_emoji = {"buy": "✅", "sell": "🔴", "manual_review": "⚠️"}.get(
-        sig.get("action"), "❓"
-      )
-      lines.append(
-        f"{action_emoji} {sig.get('symbol', 'N/A')} {sig.get('action', 'N/A')} {sig.get('strategy', '')} {sig.get('period', '')}"
-      )
-    if len(signals) > 10:
-      lines.append(f"...还有 {len(signals) - 10} 个信号")
-    msg = "📋 交易队列生成完成\n" + "\n".join(lines)
-    telegram_send_message(msg)
+    # Send signals in chunks of up to 10. Keep header/counts in each message.
+    total = len(signals)
+    chunk_size = 10
+    for start in range(0, total, chunk_size):
+      chunk = signals[start : start + chunk_size]
+      lines = [
+        f"📋 今日交易队列 ({queue.get('generated_at', '')[:10]})",
+        f"共 {total} 个信号",
+        f"买入: {buy_count} | 卖出: {sell_count} | 待人工: {manual_count}",
+        "",
+      ]
+      for sig in chunk:
+        action_emoji = {"buy": "✅", "sell": "🔴", "manual_review": "⚠️"}.get(
+          sig.get("action"), "❓"
+        )
+        lines.append(
+          f"{action_emoji} {sig.get('symbol', 'N/A')} {sig.get('action', 'N/A')} {sig.get('strategy', '')} {sig.get('period', '')}"
+        )
+      msg = "📋 交易队列生成完成\n" + "\n".join(lines)
+      telegram_send_message(msg)
     logger.info("[QUEUE-PUSH] telegram推送成功")
   except Exception as e:
     logger.exception("[QUEUE-PUSH] telegram推送异常: %s", e)
