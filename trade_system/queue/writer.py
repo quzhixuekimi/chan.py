@@ -67,6 +67,7 @@ class Signal(NamedTuple):
   stop_price: float | None
   status: Literal["queued", "manual_review", "filled", "cancelled", "failed"]
   generated_at: str
+  event_time: str | None
 
 
 def _build_signal(
@@ -79,6 +80,29 @@ def _build_signal(
     "queued", "manual_review", "filled", "cancelled", "failed"
   ] = "queued",
 ) -> Signal:
+  # try to extract an event/bar time from common keys in the source row
+  def _pick_time(r: dict) -> str | None:
+    for k in (
+      "event_time",
+      "datetime",
+      "event_date",
+    ):
+      if k in r:
+        v = r.get(k)
+        if v is None:
+          continue
+        # convert Timestamp / numeric to str safely
+        try:
+          s = str(v)
+        except Exception:
+          continue
+        if s.strip() == "":
+          continue
+        return s
+    return None
+
+  event_time = _pick_time(row)
+
   return Signal(
     id=str(uuid.uuid4()),
     symbol=symbol,
@@ -89,6 +113,7 @@ def _build_signal(
     stop_price=row.get("stop_price"),
     status=status,
     generated_at=datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
+    event_time=event_time,
   )
 
 

@@ -37,7 +37,6 @@ DEFAULT_SYMBOLS = [
   "OKLO",
   "SOXL",
   "AMD",
-  "CRCL",
   "HIMS",
   "QUBT",
   "MU",
@@ -213,7 +212,7 @@ def _push_queue_to_telegram(config: WorkflowConfig):
           sig.get("action"), "❓"
         )
         lines.append(
-          f"{action_emoji} {sig.get('symbol', 'N/A')} {sig.get('action', 'N/A')} {sig.get('strategy', '')} {sig.get('period', '')}"
+          f"{action_emoji} {sig.get('symbol', 'N/A')} {sig.get('action', 'N/A')} {sig.get('strategy', '')} {sig.get('period', '')} {sig.get('event_time', '')}"
         )
       msg = "📋 交易队列生成完成\n" + "\n".join(lines)
       telegram_send_message(msg)
