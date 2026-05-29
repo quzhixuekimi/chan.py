@@ -43,7 +43,7 @@ DEFAULT_SYMBOLS = [
   "MU",
   "GOOG",
   "AVGO",
-  "ORCL"
+  "ORCL",
 ]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H", "30M", "15M"]
 
