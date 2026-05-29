@@ -54,7 +54,7 @@ SELL_PRIORITY = [
   "user_strategy_v7_bi",
   "user_strategy_v8_byma",
 ]
-PERIOD_PRIORITY = ["1H", "2H", "4H", "1D"]
+PERIOD_PRIORITY = ["15M", "30M", "1H", "2H", "4H", "1D"]
 
 
 class Signal(NamedTuple):
@@ -474,13 +474,26 @@ def _normalize_digest_df(
   # Load mapping (allow external overrides)
   event_map = load_signal_mappings(strategy)
 
+  # Ensure any BOM on first column name is removed (some CSVs contain \ufeff)
+  df = df.copy()
+  df.columns = [c.lstrip("\ufeff") if isinstance(c, str) else c for c in df.columns]
+
   # timeframe order aligned with PERIOD_PRIORITY used by _pick_signal
-  tf_pairs = [("1h", "1H"), ("2h", "2H"), ("4h", "4H"), ("1d", "1D")]
+  # include 30m and 15m to capture signals on smaller timeframes
+  tf_pairs = [
+    ("1h", "1H"),
+    ("2h", "2H"),
+    ("4h", "4H"),
+    ("1d", "1D"),
+    ("30m", "30M"),
+    ("15m", "15M"),
+  ]
 
   actions = []
   periods = []
   target_prices = []
   stop_prices = []
+  event_times = []
 
   for _, row in df.iterrows():
     action = None
@@ -503,13 +516,38 @@ def _normalize_digest_df(
       evs = str(ev).strip()
       if evs == "":
         continue
-      mapped = event_map.get(evs)
-      if mapped is not None:
-        action = mapped
-        period_label = label
-        # pick price/stop from matching timeframe if available
-        latest_col = f"{tf_col}_latest_price"
-        stop_col = f"{tf_col}_stop_price"
+        mapped = event_map.get(evs)
+        if mapped is not None:
+          action = mapped
+          period_label = label
+          # pick price/stop from matching timeframe if available
+          latest_col = f"{tf_col}_latest_price"
+          stop_col = f"{tf_col}_stop_price"
+          # pick event time from common per-timeframe time columns if present
+          time_col_candidates = [
+            f"{tf_col}_latest_time",
+            f"{tf_col}_latest_datetime",
+            f"{tf_col}_event_time",
+            f"{tf_col}_event_datetime",
+            f"{tf_col}_latest_ts",
+            "event_time",
+            "event_time_str",
+            "event_date",
+          ]
+          tval = None
+          for tc in time_col_candidates:
+            if tc in df.columns:
+              tval = row.get(tc)
+              if tval is None:
+                continue
+              # avoid NaN
+              try:
+                if isinstance(tval, float) and math.isnan(tval):
+                  tval = None
+                  continue
+              except Exception:
+                pass
+              break
         if latest_col in df.columns:
           tgt = row.get(latest_col)
         if stop_col in df.columns:
@@ -519,11 +557,17 @@ def _normalize_digest_df(
     periods.append(period_label)
     target_prices.append(tgt)
     stop_prices.append(stp)
+    # append the found time (or None)
+    event_times.append(tval if tval is not None else None)
 
   df["action"] = actions
   df["period"] = periods
   df["target_price"] = target_prices
   df["stop_price"] = stop_prices
+  # normalize/collect event_time from matching timeframe
+  df["event_time"] = [
+    str(x) if x is not None and x != "" else None for x in event_times
+  ]
 
   # Normalize empty strings to proper dtypes
   return df
