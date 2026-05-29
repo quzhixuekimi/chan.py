@@ -500,6 +500,7 @@ def _normalize_digest_df(
     period_label = ""
     tgt = None
     stp = None
+    tval = None
     for tf_col, label in tf_pairs:
       ev_col = f"{tf_col}_event_type"
       if ev_col not in df.columns:
@@ -516,38 +517,38 @@ def _normalize_digest_df(
       evs = str(ev).strip()
       if evs == "":
         continue
-        mapped = event_map.get(evs)
-        if mapped is not None:
-          action = mapped
-          period_label = label
-          # pick price/stop from matching timeframe if available
-          latest_col = f"{tf_col}_latest_price"
-          stop_col = f"{tf_col}_stop_price"
-          # pick event time from common per-timeframe time columns if present
-          time_col_candidates = [
-            f"{tf_col}_latest_time",
-            f"{tf_col}_latest_datetime",
-            f"{tf_col}_event_time",
-            f"{tf_col}_event_datetime",
-            f"{tf_col}_latest_ts",
-            "event_time",
-            "event_time_str",
-            "event_date",
-          ]
-          tval = None
-          for tc in time_col_candidates:
-            if tc in df.columns:
-              tval = row.get(tc)
-              if tval is None:
+
+      mapped = event_map.get(evs)
+      if mapped is not None:
+        action = mapped
+        period_label = label
+        # pick price/stop from matching timeframe if available
+        latest_col = f"{tf_col}_latest_price"
+        stop_col = f"{tf_col}_stop_price"
+        # pick event time from common per-timeframe time columns if present
+        time_col_candidates = [
+          f"{tf_col}_latest_time",
+          f"{tf_col}_latest_datetime",
+          f"{tf_col}_event_time",
+          f"{tf_col}_event_datetime",
+          f"{tf_col}_latest_ts",
+          "event_time",
+          "event_time_str",
+          "event_date",
+        ]
+        for tc in time_col_candidates:
+          if tc in df.columns:
+            vv = row.get(tc)
+            if vv is None:
+              continue
+            try:
+              if isinstance(vv, float) and math.isnan(vv):
                 continue
-              # avoid NaN
-              try:
-                if isinstance(tval, float) and math.isnan(tval):
-                  tval = None
-                  continue
-              except Exception:
-                pass
-              break
+            except Exception:
+              pass
+            tval = vv
+            break
+
         if latest_col in df.columns:
           tgt = row.get(latest_col)
         if stop_col in df.columns:
