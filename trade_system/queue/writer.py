@@ -44,6 +44,19 @@ def _get_queue_dir() -> Path:
     return Path(__file__).resolve().parent / "queue"
 
 
+BUY_PRIORITY = [
+  "user_strategy_v7_bi",
+  "user_strategy_v5_macdtd",
+  "user_strategy_v8_byma",
+]
+
+SELL_PRIORITY = [
+  "user_strategy_v7_bi",
+  "user_strategy_v5_macdtd",
+  "user_strategy_v8_byma",
+]
+
+# 只保留 30M / 1H / 2H / 4H，忽略 15M 和 1D
 PERIOD_PRIORITY = ["30M", "1H", "2H", "4H"]
 
 
@@ -107,94 +120,146 @@ def _build_signal(
   )
 
 
-def _build_conflict_signal(trigger_row: dict) -> Signal | None:
-    """Build a manual_review conflict signal."""
+def _pick_signal(buy_df: pd.DataFrame, sell_df: pd.DataFrame) -> Signal | None:
+  """按优先级从 buy_df / sell_df 中选一个信号。"""
+  buy_list = [
+    r for r in buy_df.to_dict("records") if str(r.get("action")).lower() == "buy"
+  ]
+  sell_list = [
+    r for r in sell_df.to_dict("records") if str(r.get("action")).lower() == "sell"
+  ]
+
+  def _best_candidate(rows: list[dict], priority_strategies: list[str]) -> dict | None:
+    # 只保留允许参与队列生成的周期，忽略 15M / 1D / 其他非白名单周期
+    filtered_rows = [r for r in rows if r.get("period") in PERIOD_PRIORITY]
+    if not filtered_rows:
+      return None
+
+    # Return the single best row according to strategy priority then period priority
+    for strat in priority_strategies:
+      for period in PERIOD_PRIORITY:
+        for r in filtered_rows:
+          if r.get("strategy") == strat and r.get("period") == period:
+            return r
+
+    # fallback: prefer first row with any non-empty strategy/period, else first row
+    for r in filtered_rows:
+      if r.get("strategy") or r.get("period"):
+        return r
+    return filtered_rows[0]
+
+  # If both buy and sell exist, resolve by comparing the best candidates' priorities
+  if buy_list and sell_list:
+    best_buy = _best_candidate(buy_list, BUY_PRIORITY)
+    best_sell = _best_candidate(sell_list, SELL_PRIORITY)
+
+    if best_buy is None and best_sell is None:
+      return None
+
+    if best_buy is None:
+      return _build_signal(
+        best_sell["symbol"],
+        "sell",
+        best_sell.get("strategy", ""),
+        best_sell.get("period", ""),
+        best_sell,
+      )
+
+    if best_sell is None:
+      return _build_signal(
+        best_buy["symbol"],
+        "buy",
+        best_buy.get("strategy", ""),
+        best_buy.get("period", ""),
+        best_buy,
+      )
+
+    # compute strategy rank (lower index = higher priority)
+    def _rank_strategy(strategy_name: str, priority_list: list[str]) -> int:
+      try:
+        return priority_list.index(strategy_name)
+      except ValueError:
+        return len(priority_list)
+
+    buy_rank = _rank_strategy(best_buy.get("strategy", ""), BUY_PRIORITY)
+    sell_rank = _rank_strategy(best_sell.get("strategy", ""), SELL_PRIORITY)
+
+    # If one side has a strictly higher strategy priority, pick it
+    if buy_rank < sell_rank:
+      return _build_signal(
+        best_buy["symbol"],
+        "buy",
+        best_buy.get("strategy", ""),
+        best_buy.get("period", ""),
+        best_buy,
+      )
+
+    if sell_rank < buy_rank:
+      return _build_signal(
+        best_sell["symbol"],
+        "sell",
+        best_sell.get("strategy", ""),
+        best_sell.get("period", ""),
+        best_sell,
+      )
+
+    # If strategy ranks tie, use period priority
+    def _period_index(period_label: str) -> int:
+      try:
+        return PERIOD_PRIORITY.index(period_label)
+      except ValueError:
+        return len(PERIOD_PRIORITY)
+
+    buy_period_idx = _period_index(best_buy.get("period", ""))
+    sell_period_idx = _period_index(best_sell.get("period", ""))
+
+    if buy_period_idx < sell_period_idx:
+      return _build_signal(
+        best_buy["symbol"],
+        "buy",
+        best_buy.get("strategy", ""),
+        best_buy.get("period", ""),
+        best_buy,
+      )
+
+    if sell_period_idx < buy_period_idx:
+      return _build_signal(
+        best_sell["symbol"],
+        "sell",
+        best_sell.get("strategy", ""),
+        best_sell.get("period", ""),
+        best_sell,
+      )
+
+    # If still tied (unlikely), mark manual review and attach conflict info
     return _build_signal(
-        trigger_row.get("symbol", ""),
-        "",
-        "conflict",
-        "N/A",
-        trigger_row,
-        status="manual_review",
+      best_buy.get("symbol", best_sell.get("symbol", "")),
+      "",
+      "conflict",
+      "N/A",
+      best_buy or best_sell,
+      status="manual_review",
     )
 
+  # Only buy candidates
+  if buy_list:
+    r = _best_candidate(buy_list, BUY_PRIORITY)
+    if r is None:
+      return None
+    return _build_signal(
+      r["symbol"], "buy", r.get("strategy", ""), r.get("period", ""), r
+    )
 
-def _pick_signal(buy_df: pd.DataFrame, sell_df: pd.DataFrame) -> Signal | None:
-    """按新优先级规则从候选行中选出一个信号：
-    - v7_bi 最高优先：任一周期有信号即用
-    - v7 无信号时：v5 AND v8 同一周期同向信号才生成
-    - 冲突：一周期内 v5/v8 方向相反，或 v7 与 v5+v8 方向相反 → manual_review
-    - Telegram strategy/event_time：v7 触发时用 v7 的，v5+v8 触发时用 v5 的
-    """
-    target_actions = {"buy": buy_df, "sell": sell_df}
+  # Only sell candidates
+  if sell_list:
+    r = _best_candidate(sell_list, SELL_PRIORITY)
+    if r is None:
+      return None
+    return _build_signal(
+      r["symbol"], "sell", r.get("strategy", ""), r.get("period", ""), r
+    )
 
-    for action, df in target_actions.items():
-        if df.empty:
-            continue
-
-        rows = df.to_dict("records")
-        signals_by_period: dict[str, dict[str, dict]] = {
-            p: {} for p in PERIOD_PRIORITY
-        }
-
-        for r in rows:
-            period = r.get("period", "")
-            if period not in signals_by_period:
-                continue
-            strategy = r.get("strategy", "")
-            signals_by_period[period][strategy] = r
-
-        for period in PERIOD_PRIORITY:
-            period_signals = signals_by_period.get(period, {})
-            v7_row = period_signals.get("user_strategy_v7_bi")
-            v5_row = period_signals.get("user_strategy_v5_macdtd")
-            v8_row = period_signals.get("user_strategy_v8_byma")
-
-            v7_action = v7_row.get("action") if v7_row else None
-            v5_action = v5_row.get("action") if v5_row else None
-            v8_action = v8_row.get("action") if v8_row else None
-
-            if action == "buy":
-                if v7_action == "buy":
-                    return _build_signal(
-                        v7_row.get("symbol", ""),
-                        "buy",
-                        v7_row.get("strategy", ""),
-                        period,
-                        v7_row,
-                    )
-                if v5_action == "buy" and v8_action == "buy":
-                    return _build_signal(
-                        v5_row.get("symbol", ""),
-                        "buy",
-                        v5_row.get("strategy", ""),
-                        period,
-                        v5_row,
-                    )
-                if v5_action is not None and v8_action is not None and v5_action != v8_action:
-                    return _build_conflict_signal(v5_row)
-
-            else:  # sell
-                if v7_action == "sell":
-                    return _build_signal(
-                        v7_row.get("symbol", ""),
-                        "sell",
-                        v7_row.get("strategy", ""),
-                        period,
-                        v7_row,
-                    )
-                if v5_action == "sell" and v8_action == "sell":
-                    return _build_signal(
-                        v5_row.get("symbol", ""),
-                        "sell",
-                        v5_row.get("strategy", ""),
-                        period,
-                        v5_row,
-                    )
-                if v5_action is not None and v8_action is not None and v5_action != v8_action:
-                    return _build_conflict_signal(v5_row)
-
-    return None
+  return None
 
 
 def _load_bystock_sent_state() -> dict[str, dict]:
@@ -257,6 +322,11 @@ def write_queue_from_digest(digest_csv: Path, output_path: Path | None = None) -
       df = _normalize_digest_df(df, strategy, source_file=digest_csv.name)
     except Exception:
       logger.exception("failed to normalize digest CSV %s", digest_csv)
+
+  # 额外保险：只保留允许参与队列生成的周期
+  if "period" in df.columns:
+    df = df[df["period"].isin(PERIOD_PRIORITY)].copy()
+
   queue_data = {
     "generated_at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
     "signals": [],
@@ -302,6 +372,11 @@ def write_queue_from_multiple_digests(
         df = _normalize_digest_df(df, strategy, source_file=csv_file.name)
       except Exception:
         logger.exception("failed to normalize digest %s", csv_file)
+
+    # 额外保险：只保留允许参与队列生成的周期
+    if "period" in df.columns:
+      df = df[df["period"].isin(PERIOD_PRIORITY)].copy()
+
     df["_source_file"] = csv_file.name
     all_rows.append(df)
 
@@ -396,7 +471,7 @@ def _normalize_digest_df(
   """Add/derive columns: 'strategy', 'action', 'period', 'target_price', 'stop_price'.
 
   Rules:
-  - Check timeframe event_type columns in PERIOD_PRIORITY order (1H,2H,4H,1D -> maps to 1h_event_type etc.)
+  - 只处理 30M / 1H / 2H / 4H，忽略 15M 和 1D
   - Use per-strategy event_type->action mapping
   - Populate 'strategy' column with detected strategy
   - Populate 'target_price' and 'stop_price' from corresponding '<period>_latest_price' and '<period>_stop_price'
@@ -413,8 +488,7 @@ def _normalize_digest_df(
   df = df.copy()
   df.columns = [c.lstrip("\ufeff") if isinstance(c, str) else c for c in df.columns]
 
-  # timeframe order aligned with PERIOD_PRIORITY used by _pick_signal
-  # include 30m and 15m to capture signals on smaller timeframes
+  # 只保留允许参与队列生成的周期
   tf_pairs = [
     ("30m", "30M"),
     ("1h", "1H"),
