@@ -43,6 +43,7 @@ DEFAULT_SYMBOLS = [
   "GOOG",
   "AVGO",
   "ORCL",
+  "TEM",
 ]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H", "30M", "15M"]
 
@@ -207,7 +208,10 @@ def run_indicators_step(config: WorkflowConfig) -> dict:
             body = {"raw": resp.text[:1000]}
           success += 1
           logger.info(
-            "[INDICATORS] ok symbol=%s level=%s status=%s", symbol, level, resp.status_code
+            "[INDICATORS] ok symbol=%s level=%s status=%s",
+            symbol,
+            level,
+            resp.status_code,
           )
           logger.debug(
             "[INDICATORS] response symbol=%s level=%s body=%s",
