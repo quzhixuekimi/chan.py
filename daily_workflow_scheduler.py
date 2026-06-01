@@ -182,6 +182,82 @@ def run_analyze_step(config: WorkflowConfig) -> dict:
   }
 
 
+def run_indicators_step(config: WorkflowConfig) -> dict:
+  indicators_url = f"{config.base_url.rstrip('/')}/api/chan/indicators"
+  total = 0
+  success = 0
+  failed = 0
+  failures: list[dict] = []
+
+  logger.info(
+    "[INDICATORS] start symbols=%s levels=%s", len(config.symbols), config.levels
+  )
+
+  for symbol in config.symbols:
+    for level in config.levels:
+      total += 1
+      payload = {"code": symbol, "level": level}
+      try:
+        logger.info("[INDICATORS] request symbol=%s level=%s", symbol, level)
+        resp = _post_json(indicators_url, payload, config.request_timeout)
+        if resp.ok:
+          try:
+            body = resp.json()
+          except Exception:
+            body = {"raw": resp.text[:1000]}
+          success += 1
+          logger.info(
+            "[INDICATORS] ok symbol=%s level=%s status=%s", symbol, level, resp.status_code
+          )
+          logger.debug(
+            "[INDICATORS] response symbol=%s level=%s body=%s",
+            symbol,
+            level,
+            json.dumps(body, ensure_ascii=False)[:2000],
+          )
+        else:
+          failed += 1
+          info = {
+            "symbol": symbol,
+            "level": level,
+            "status_code": resp.status_code,
+            "response": resp.text[:2000],
+          }
+          failures.append(info)
+          logger.error(
+            "[INDICATORS] fail symbol=%s level=%s status=%s response=%s",
+            symbol,
+            level,
+            resp.status_code,
+            resp.text[:1000],
+          )
+      except Exception as e:
+        failed += 1
+        info = {
+          "symbol": symbol,
+          "level": level,
+          "status_code": None,
+          "response": str(e),
+        }
+        failures.append(info)
+        logger.exception(
+          "[INDICATORS] exception symbol=%s level=%s err=%s", symbol, level, e
+        )
+      finally:
+        if config.pause_seconds > 0:
+          time.sleep(config.pause_seconds)
+
+  logger.info(
+    "[INDICATORS] finished total=%s success=%s failed=%s", total, success, failed
+  )
+  return {
+    "total": total,
+    "success": success,
+    "failed": failed,
+    "failures": failures,
+  }
+
+
 def _push_queue_to_telegram(config: WorkflowConfig):
   try:
     import db
@@ -413,11 +489,14 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
       "started_at": started_at,
       "finished_at": _now_str(config.timezone),
       "analyze": analyze_result,
+      "indicators": None,
       "backtest": None,
       "notify": None,
       "status": "failed",
       "reason": "no analyze success",
     }
+
+  indicators_result = run_indicators_step(config)
 
   backtest_result = run_backtest_step(config)
   requested_strategies = (
@@ -460,6 +539,7 @@ def run_daily_workflow(config: WorkflowConfig) -> dict:
     "started_at": started_at,
     "finished_at": finished_at,
     "analyze": analyze_result,
+    "indicators": indicators_result,
     "backtest": backtest_result,
     "notify": notify_result,
     "status": "ok",
