@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
-
 import pandas as pd
 
 from Common.CEnum import DATA_FIELD, AUTYPE
@@ -10,62 +7,7 @@ from Common.CTime import CTime
 from DataAPI.CommonStockAPI import CCommonStockApi
 from KLine.KLine_Unit import CKLine_Unit
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_CACHE_DIR = BASE_DIR / "data_cache"
-
-
-def _today_str() -> str:
-  return datetime.now().strftime("%Y-%m-%d")
-
-
-def _safe_filename_part(value: str | None) -> str:
-  if not value:
-    return "none"
-  # Replace unsafe characters and strip dot separators
-  return (
-    str(value)
-    .replace("/", "-")
-    .replace(":", "_")
-    .replace(".", "_")
-    .replace(" ", "_")
-  )
-
-
-def _build_intraday_csv_cache_path(code: str, timeframe: str) -> Path:
-  code_part = _safe_filename_part(code)
-  tf_part = timeframe.lower()
-  # 30m/15m only support 60d in yfinance; 1h/2h/4h support 730d
-  days_suffix = "60d" if tf_part in ("30m", "15m") else "730d"
-  return DATA_CACHE_DIR / f"{code_part}_{_today_str()}_yf_{tf_part}_{days_suffix}.csv"
-
-
-def _load_intraday_df(code: str, timeframe: str) -> pd.DataFrame:
-  csv_path = _build_intraday_csv_cache_path(code, timeframe)
-  if not csv_path.exists():
-    raise FileNotFoundError(f"离线 intraday csv 不存在: {csv_path}")
-
-  df = pd.read_csv(csv_path)
-  if df is None or df.empty:
-    raise ValueError(f"离线 intraday csv 为空: {csv_path}")
-
-  df.columns = [str(c).strip().lower() for c in df.columns]
-
-  if "time" in df.columns and "dt" not in df.columns:
-    df = df.rename(columns={"time": "dt"})
-
-  required_cols = {"dt", "open", "high", "low", "close", "volume"}
-  missing = required_cols - set(df.columns)
-  if missing:
-    raise ValueError(f"离线 intraday csv 缺少列: {missing}, path={csv_path}")
-
-  df = df.copy()
-  df["dt"] = pd.to_datetime(df["dt"], errors="coerce")
-  df = df.dropna(subset=["dt"]).sort_values("dt").reset_index(drop=True)
-
-  if df.empty:
-    raise ValueError(f"离线 intraday csv 标准化后为空: {csv_path}")
-
-  return df
+import kline_store
 
 
 class _BaseOfflineYFinanceIntradayCsvAPI(CCommonStockApi):
@@ -90,25 +32,19 @@ class _BaseOfflineYFinanceIntradayCsvAPI(CCommonStockApi):
     if not self.TIMEFRAME:
       raise ValueError("TIMEFRAME 未配置")
 
-    df = _load_intraday_df(self.code, self.TIMEFRAME)
+    df = kline_store.read_kline_df(
+      self.code, self.TIMEFRAME,
+      begin_date=self.begin_date, end_date=self.end_date,
+    )
 
-    if self.begin_date:
-      begin_dt = pd.to_datetime(self.begin_date)
-      df = df[df["dt"] >= begin_dt]
-
-    if self.end_date:
-      end_dt = pd.to_datetime(self.end_date) + pd.Timedelta(days=1)
-      df = df[df["dt"] < end_dt]
-
-    df = df.sort_values("dt").reset_index(drop=True)
     if df.empty:
       raise ValueError(
-        f"离线 intraday 数据过滤后为空: code={self.code}, timeframe={self.TIMEFRAME}, "
+        f"kline({self.TIMEFRAME}) is empty in db: code={self.code}, "
         f"begin={self.begin_date}, end={self.end_date}"
       )
 
     for _, row in df.iterrows():
-      dt = row["dt"]
+      dt = row["time"]
       item = {
         DATA_FIELD.FIELD_TIME: CTime(
           dt.year, dt.month, dt.day, dt.hour, dt.minute, auto=False

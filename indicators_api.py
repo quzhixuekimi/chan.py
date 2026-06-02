@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
 from typing import Literal
 
 import pandas as pd
@@ -11,10 +9,9 @@ from datetime import date
 import logging
 from db import engine, get_cached, set_cached, delete_old_cache_for_code
 
-router = APIRouter()
+import kline_store
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_CACHE_DIR = BASE_DIR / "data_cache"
+router = APIRouter()
 
 LevelType = Literal["1D", "1H", "2H", "4H", "30M", "15M"]
 
@@ -62,81 +59,14 @@ class IndicatorsResponse(BaseModel):
   data: IndicatorsData
 
 
-def _today_str() -> str:
-  return datetime.now().strftime("%Y-%m-%d")
-
-
-def _safe_filename_part(value: str | None) -> str:
-  if not value:
-    return "none"
-  # Replace unsafe characters and also strip dot separators used in stock codes
-  return (
-    str(value).replace("/", "-").replace(":", "_").replace(".", "_").replace(" ", "_")
-  )
-
-
-def _build_daily_csv_cache_path(code: str) -> Path:
-  return DATA_CACHE_DIR / f"{code.upper()}_{_today_str()}_1d.csv"
-
-
-def _build_intraday_csv_cache_path(code: str, timeframe: str) -> Path:
-  code_part = _safe_filename_part(code)
-  tf_part = timeframe.lower()
-
-  # Default retention days for intraday files
-  days = 730
-  # Use shorter retention for higher-frequency intraday data
-  if tf_part in ("15m", "30m"):
-    days = 60
-
-  return DATA_CACHE_DIR / f"{code_part}_{_today_str()}_yf_{tf_part}_{days}d.csv"
-
-
-def _resolve_cache_path(code: str, level: LevelType) -> Path:
-  if level == "1D":
-    return _build_daily_csv_cache_path(code)
-
-  tf_map = {"1H": "1h", "2H": "2h", "4H": "4h", "30M": "30m", "15M": "15m"}
-  return _build_intraday_csv_cache_path(code, tf_map[level])
-
-
-def _load_cached_df(code: str, level: LevelType) -> tuple[pd.DataFrame, Path]:
-  csv_path = _resolve_cache_path(code, level)
-
-  if not csv_path.exists():
-    raise FileNotFoundError(f"离线 csv 不存在: {csv_path}")
-
-  df = pd.read_csv(csv_path)
+def _load_db_df(code: str, level: LevelType) -> tuple[pd.DataFrame, str]:
+  """从 kline 表读取 (code, level) 数据，返回的 df 含 dt 列（与原 csv reader 兼容）。"""
+  df = kline_store.read_kline_df(code, level.lower())
   if df is None or df.empty:
-    raise ValueError(f"离线 csv 为空: {csv_path}")
-
-  df.columns = [str(c).strip().lower() for c in df.columns]
-
-  if "time" in df.columns and "dt" not in df.columns:
-    df = df.rename(columns={"time": "dt"})
-  if "date" in df.columns and "dt" not in df.columns:
-    df = df.rename(columns={"date": "dt"})
-
-  required = {"dt", "open", "high", "low", "close"}
-  missing = required - set(df.columns)
-  if missing:
-    raise ValueError(f"离线 csv 缺少列: {missing}, path={csv_path}")
-
-  if "volume" not in df.columns:
-    df["volume"] = 0.0
-
-  df["dt"] = pd.to_datetime(df["dt"], errors="coerce")
-  df = df.dropna(subset=["dt"]).sort_values("dt").reset_index(drop=True)
-
-  for col in ["open", "high", "low", "close", "volume"]:
-    df[col] = pd.to_numeric(df[col], errors="coerce")
-
-  df = df.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
-
-  if df.empty:
-    raise ValueError(f"离线 csv 标准化后为空: {csv_path}")
-
-  return df, csv_path
+    raise ValueError(f"kline({level}) 为空: code={code}")
+  df = df.rename(columns={"time": "dt"})
+  synthetic_path = f"kline://{code}/{level.lower()}"
+  return df, synthetic_path
 
 
 def _ema(series: pd.Series, span: int) -> pd.Series:
@@ -267,7 +197,7 @@ def _calc_td9_labels(df: pd.DataFrame) -> list[TD9Label]:
 
 
 def _build_indicators(code: str, level: LevelType) -> IndicatorsData:
-  df, csv_path = _load_cached_df(code, level)
+  df, cache_path = _load_db_df(code, level)
 
   df = df.copy()
 
@@ -280,7 +210,7 @@ def _build_indicators(code: str, level: LevelType) -> IndicatorsData:
   return IndicatorsData(
     symbol=code.upper(),
     level=level,
-    cache_file=str(csv_path),
+    cache_file=cache_path,
     blue_upper=_to_line_points(df, "blue_upper"),
     blue_lower=_to_line_points(df, "blue_lower"),
     yellow_upper=_to_line_points(df, "yellow_upper"),
@@ -326,16 +256,8 @@ def get_indicators(req: IndicatorsRequest):
     # Delete old cache entries for this code before calculating new data
     with engine.begin() as conn:
       delete_old_cache_for_code(conn, code, today)
-    # ---- 2️⃣ 原有计算 ----
-    # ---- 2️⃣ 确保 data_cache 中有相应的 CSV（若不存在会自动下载） ----
-    if level == "1D":
-      from chan_api_server import get_or_build_1d_csv
-
-      _ = get_or_build_1d_csv(code)  # 只为确保文件存在
-    else:
-      from chan_api_server import ensure_intraday_day_cache
-
-      _ = ensure_intraday_day_cache(code, [level])  # 返回 dict，确保对应 level 已生成
+    # ---- 2️⃣ 确保 kline 表中有 (code, level) 的最新数据（增量 UPSERT） ----
+    kline_store.ensure_levels_updated([code], [level])
     # ---- 3️⃣ 原有计算 ----
     data = _build_indicators(code, level)
     response = IndicatorsResponse(code=0, message="ok", data=data)
