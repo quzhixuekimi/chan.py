@@ -11,6 +11,10 @@ from typing import List, Dict, Any
 
 import pandas as pd
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import kline_loader
+
 from . import DataLoader
 from .backtest_engine import BacktestEngine
 
@@ -499,7 +503,8 @@ def main():
       print(f"  [{tf}] {csv_path.name}")
 
       try:
-        dl = DataLoader("data_cache")
+        kline_loader.ensure_kline_data([symbol], TIMEFRAMES)
+        dl = DataLoader("data_cache", source="db")
         df = dl.load(symbol, tf)
         df = df.iloc[-args.limit :]
         if df.empty:

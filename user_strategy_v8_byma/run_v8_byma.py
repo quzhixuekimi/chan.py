@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import pandas as pd
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import kline_loader
 
 from user_strategy_v8_byma.config import StrategyConfig
 from user_strategy_v8_byma.backtest_engine import BymaBacktester
@@ -858,8 +861,34 @@ def build_cycle_history_for_latest_cycle(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_price_data(
-  csv_path: Path, start_time: str | None = None, end_time: str | None = None
+  code: str,
+  level: str,
+  source: str = "db",
+  start_time: str | None = None,
+  end_time: str | None = None,
 ) -> pd.DataFrame:
+  if source == "db":
+    df = kline_loader.load_kline_df(code, level, start=start_time, end=end_time)
+    df = df.rename(columns={"time": "dt"})
+    return df
+
+  # CSV 原有逻辑（兼容 source='csv' 模式）
+  from pathlib import Path
+  from datetime import datetime
+  today = datetime.now().strftime("%Y-%m-%d")
+  data_dir = Path(__file__).resolve().parent.parent / "data_cache"
+  code_u = code.upper()
+  if level == "1D":
+    csv_path = data_dir / f"{code_u}_{today}_1d.csv"
+  elif level in ("4h", "2h", "1h"):
+    csv_path = data_dir / f"{code_u}_{today}_yf_{level}_730d.csv"
+  elif level in ("30m", "15m"):
+    csv_path = data_dir / f"{code_u}_{today}_yf_{level}_60d.csv"
+  else:
+    raise ValueError(f"unknown level: {level}")
+  if not csv_path.exists():
+    raise FileNotFoundError(f"CSV not found: {csv_path}")
+
   df = pd.read_csv(csv_path)
   df.columns = [str(c).strip().lower() for c in df.columns]
 
@@ -914,6 +943,8 @@ def main():
   for symbol in all_symbols:
     print(f"\n{'=' * 40}\n正在处理股票: {symbol}\n{'=' * 40}")
 
+    kline_loader.ensure_kline_data([symbol], TIMEFRAME_ORDER)
+
     conf.symbol = symbol
     symbol_summary = []
     symbol_signal_events = []
@@ -929,25 +960,11 @@ def main():
         print(f" [白名单跳过] {symbol} {tf.name}")
         continue
 
-      today = datetime.now().strftime("%Y-%m-%d")
-      if tf.level == "1D":
-        csv_path = data_dir / f"{symbol}_{today}_1d.csv"
-      elif tf.name in ("4h", "2h", "1h"):
-        csv_path = data_dir / f"{symbol}_{today}_yf_{tf.name}_730d.csv"
-      elif tf.name in ("30m", "15m"):
-        csv_path = data_dir / f"{symbol}_{today}_yf_{tf.name}_60d.csv"
-      else:
-        print(f" [!] 未知 timeframe: {tf.name}，跳过")
-        continue
-
-      if not csv_path.exists():
-        print(f" [!] 未找到 {symbol} 的 {tf.name} 数据文件，跳过")
-        continue
-      print(f" 处理时间框架: {tf.name} ({tf.level}) -> {csv_path.name}")
+      print(f" 处理时间框架: {tf.name} ({tf.level})")
 
       try:
         price_df = load_price_data(
-          csv_path, start_time=tf.start_time, end_time=tf.end_time
+          symbol, tf_name, source="db", start_time=tf.start_time, end_time=tf.end_time
         )
 
         if len(price_df) < conf.min_bars_required:
