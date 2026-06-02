@@ -460,9 +460,7 @@ def main():
   parser.add_argument("--limit", type=int, default=500)
   args = parser.parse_args()
 
-  repo_root = Path(__file__).resolve().parent.parent
-  data_dir = repo_root / "data_cache"
-  out_dir = repo_root / "user_strategy_v5_macdtd" / "results"
+  out_dir = Path(__file__).resolve().parent / "results"
   out_dir.mkdir(parents=True, exist_ok=True)
 
   if args.symbols:
@@ -471,10 +469,12 @@ def main():
     symbols = DEFAULT_SYMBOLS.copy()
   print(f"Processing {len(symbols)} symbols: {symbols}")
 
-  # Store all results for market summary
   all_trades: List[pd.DataFrame] = []
   all_events: Dict[str, pd.DataFrame] = {}  # key: f"{symbol}_{tf}"
   market_signal_events = []
+
+  kline_loader.ensure_kline_data(symbols, TIMEFRAMES)
+  dl = DataLoader("", source="db")
 
   for symbol in symbols:
     print("=" * 40, symbol, "=" * 40)
@@ -482,21 +482,14 @@ def main():
     symbol_events = []
 
     for tf in TIMEFRAMES:
-      csv_path = find_csv_for_timeframe(data_dir, symbol, tf)
-      if not csv_path:
-        print(f"  [{tf}] no data file found")
-        continue
-
-      print(f"  [{tf}] {csv_path.name}")
-
       try:
-        kline_loader.ensure_kline_data([symbol], TIMEFRAMES)
-        dl = DataLoader("data_cache", source="db")
         df = dl.load(symbol, tf)
         df = df.iloc[-args.limit :]
         if df.empty:
-          print(f"  [{tf}] no data loaded")
+          print(f"  [{tf}] no data in db")
           continue
+
+        print(f"  [{tf}] loaded {len(df)} rows from db")
 
         be = BacktestEngine(df, symbol=symbol, timeframe=tf)
         be.run()

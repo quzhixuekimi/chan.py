@@ -932,10 +932,10 @@ def main():
   market_signal_digest = []
   market_cycle_history = []
 
+  kline_loader.ensure_kline_data(all_symbols, TIMEFRAME_ORDER)
+
   for symbol in all_symbols:
     print(f"\n{'=' * 40}\n正在处理股票: {symbol}\n{'=' * 40}")
-
-    kline_loader.ensure_kline_data([symbol], TIMEFRAME_ORDER)
 
     conf.symbol = symbol
     symbol_summary = []
