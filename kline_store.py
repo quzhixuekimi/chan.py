@@ -29,10 +29,10 @@ Level = Literal["1d", "1h", "2h", "4h", "30m", "15m"]
 
 # 增量更新时相对最新 bar 的回溯天数，覆盖 yfinance 可能的复权/历史修正
 PULL_BACKFILL_DAYS: dict[str, int] = {
-  "1d": 7,
-  "1h": 7,
-  "30m": 2,
-  "15m": 2,
+  "1d": 360,
+  "1h": 360,
+  "30m": 60,
+  "15m": 60,
 }
 
 # yfinance period / interval 映射
