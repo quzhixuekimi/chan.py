@@ -186,13 +186,12 @@ def get_cached(conn, code: str, level: str, endpoint: str, today: date):
     return None
 
 
-
+def delete_old_cache_for_code(conn, code: str, today: date):
   """删除指定 code 中早于 today 的缓存记录（每天首次调用 API 时执行一次）"""
   stmt = api_response_cache.delete().where(
     api_response_cache.c.code == code,
     api_response_cache.c.today < today,
   )
-  conn.execute(stmt)
 
 
 def set_cached(conn, code: str, level: str, endpoint: str, today: date, content_json):
