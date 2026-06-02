@@ -184,6 +184,26 @@ def _pick_signal(buy_df: pd.DataFrame, sell_df: pd.DataFrame) -> Signal | None:
     buy_rank = _rank_strategy(best_buy.get("strategy", ""), BUY_PRIORITY)
     sell_rank = _rank_strategy(best_sell.get("strategy", ""), SELL_PRIORITY)
 
+    # check conflict: v5 vs v8 in same period, opposite actions
+    # only when v7_bi is not involved (i.e., both ranks > 0)
+    if buy_rank > 0 and sell_rank > 0:
+      buy_strategy = best_buy.get("strategy", "")
+      sell_strategy = best_sell.get("strategy", "")
+      if (
+        ((buy_strategy == "user_strategy_v5_macdtd" and sell_strategy == "user_strategy_v8_byma") or
+         (buy_strategy == "user_strategy_v8_byma" and sell_strategy == "user_strategy_v5_macdtd"))
+        and best_buy.get("period") == best_sell.get("period")
+        and best_buy.get("action", "").lower() != best_sell.get("action", "").lower()
+      ):
+        return _build_signal(
+          best_buy.get("symbol", best_sell.get("symbol", "")),
+          "",
+          "conflict",
+          best_buy.get("period", "N/A"),
+          best_buy or best_sell,
+          status="manual_review",
+        )
+
     # If one side has a strictly higher strategy priority, pick it
     if buy_rank < sell_rank:
       return _build_signal(
