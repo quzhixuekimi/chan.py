@@ -13,6 +13,7 @@ import kline_loader
 
 from user_strategy_v8_byma.config import StrategyConfig
 from user_strategy_v8_byma.backtest_engine import BymaBacktester
+from daily_workflow_scheduler import DEFAULT_SYMBOLS
 
 READABLE_EVENT_TYPES = {
   "LONG_ENTRY_READY",
@@ -37,15 +38,6 @@ SYMBOL_TIMEFRAME_WHITELIST: Dict[str, set[str]] = {}
 def save_df(df: pd.DataFrame, path: Path):
   path.parent.mkdir(parents=True, exist_ok=True)
   df.to_csv(path, index=False, encoding="utf-8-sig")
-
-
-def get_all_symbols(data_dir: Path) -> List[str]:
-  symbols = set()
-  for file in data_dir.glob("*.csv"):
-    parts = file.name.split("_")
-    if parts:
-      symbols.add(parts[0])
-  return sorted(list(symbols))
 
 
 def get_timeframe_params(tf_name: str) -> Tuple[int, int]:
@@ -932,7 +924,7 @@ def main():
   out_dir = conf.resolved_output_dir(repo_root)
   out_dir.mkdir(parents=True, exist_ok=True)
 
-  all_symbols = get_all_symbols(data_dir)
+  all_symbols = DEFAULT_SYMBOLS.copy()
   print(f"发现 {len(all_symbols)} 个股票代码: {all_symbols}")
 
   final_summary_list = []

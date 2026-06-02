@@ -14,6 +14,7 @@ import pandas as pd
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import kline_loader
+from daily_workflow_scheduler import DEFAULT_SYMBOLS
 
 from . import DataLoader
 from .backtest_engine import BacktestEngine
@@ -26,21 +27,6 @@ TIMEFRAME_LEVELS = {"1d": "1D", "4h": "4H", "2h": "2H", "1h": "1H"}
 def save_df(df: pd.DataFrame, path: Path) -> None:
   path.parent.mkdir(parents=True, exist_ok=True)
   df.to_csv(path, index=False, encoding="utf-8-sig")
-
-
-def get_all_symbols(data_dir: Path) -> List[str]:
-  symbols = set()
-  for file in data_dir.glob("*.csv"):
-    name = file.name
-    parts = name.split("_")
-    if parts:
-      for i in range(len(parts)):
-        if len(parts[i]) == 10 and parts[i].count("-") == 2:
-          symbols.add(parts[0])
-          break
-      else:
-        symbols.add(parts[0])
-  return sorted(list(symbols))
 
 
 from datetime import datetime
@@ -470,7 +456,7 @@ def build_market_digest(market_events: List[pd.DataFrame]) -> pd.DataFrame:
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument("--symbol", default=None)
+  parser.add_argument("--symbols", default=None)
   parser.add_argument("--limit", type=int, default=500)
   args = parser.parse_args()
 
@@ -479,9 +465,10 @@ def main():
   out_dir = repo_root / "user_strategy_v5_macdtd" / "results"
   out_dir.mkdir(parents=True, exist_ok=True)
 
-  # Get all symbols if not specified
-  symbols = [args.symbol.upper()] if args.symbol else get_all_symbols(data_dir)
-  symbols = [str(s).upper().strip() for s in symbols if s]
+  if args.symbols:
+    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+  else:
+    symbols = DEFAULT_SYMBOLS.copy()
   print(f"Processing {len(symbols)} symbols: {symbols}")
 
   # Store all results for market summary

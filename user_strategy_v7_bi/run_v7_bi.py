@@ -15,6 +15,7 @@ from user_strategy_v7_bi.chan_loader import (
   extract_bi_data,
 )
 from user_strategy_v7_bi.backtest_engine import BiBacktester
+from daily_workflow_scheduler import DEFAULT_SYMBOLS
 
 
 READABLE_EVENT_TYPES = {
@@ -30,15 +31,6 @@ FRESH_DAYS = 2
 def save_df(df: pd.DataFrame, path: Path):
   path.parent.mkdir(parents=True, exist_ok=True)
   df.to_csv(path, index=False, encoding="utf-8-sig")
-
-
-def get_all_symbols(data_dir: Path) -> List[str]:
-  symbols = set()
-  for file in data_dir.glob("*.csv"):
-    parts = file.name.split("_")
-    if parts:
-      symbols.add(parts[0])
-  return sorted(list(symbols))
 
 
 def deduplicate_signal_events(df: pd.DataFrame) -> pd.DataFrame:
@@ -607,7 +599,7 @@ def main():
   data_dir = conf.resolved_data_dir(repo_root)
   out_dir = conf.resolved_output_dir(repo_root)
 
-  all_symbols = get_all_symbols(data_dir)
+  all_symbols = DEFAULT_SYMBOLS.copy()
 
   print(f"发现 {len(all_symbols)} 个股票代码: {all_symbols}")
 
@@ -627,27 +619,12 @@ def main():
       if not tf.enabled:
         continue
 
-      today = datetime.now().strftime("%Y-%m-%d")
-      if tf.level == "1D":
-        csv_path = data_dir / f"{symbol}_{today}_1d.csv"
-      elif tf.name in ("4h", "2h", "1h"):
-        csv_path = data_dir / f"{symbol}_{today}_yf_{tf.name}_730d.csv"
-      elif tf.name in ("30m", "15m"):
-        csv_path = data_dir / f"{symbol}_{today}_yf_{tf.name}_60d.csv"
-      else:
-        print(f" [!] 未知 timeframe: {tf.name}，跳过")
-        continue
-
-      if not csv_path.exists():
-        print(f" [!] 未找到 {symbol} 的 {tf.name} 数据文件，跳过")
-        continue
-      print(f" 处理时间框架: {tf.name} ({tf.level}) -> {csv_path.name}")
+      print(f" 处理时间框架: {tf.name} ({tf.level})")
 
       try:
         chan, kl_type, kl_list = load_chan_data(
           code=symbol,
           level=tf.level,
-          csv_path=csv_path,
           config=conf.chan_config,
           trigger_step=conf.trigger_step,
           begin_time=tf.start_time,
