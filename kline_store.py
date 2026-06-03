@@ -139,8 +139,11 @@ def _update_source_level(code: str, level: Literal["1d", "1h", "30m", "15m"]) ->
   if latest is None:
     start = None
   else:
-    backfill = PULL_BACKFILL_DAYS[level]
-    start = (latest - timedelta(days=backfill)).strftime("%Y-%m-%d")
+    if level in ("30m", "15m"):
+      start = None
+    else:
+      backfill = PULL_BACKFILL_DAYS[level]
+      start = (latest - timedelta(days=backfill)).strftime("%Y-%m-%d")
 
   df = _fetch_yfinance(code, level, start=start)
   if df.empty:
