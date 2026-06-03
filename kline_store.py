@@ -27,12 +27,12 @@ logger = logging.getLogger("kline_store")
 
 Level = Literal["1d", "1h", "2h", "4h", "30m", "15m"]
 
-# 增量更新时相对最新 bar 的回溯天数，覆盖 yfinance 可能的复权/历史修正
+# 增量更新时相对当前时间的回溯天数
 PULL_BACKFILL_DAYS: dict[str, int] = {
-  "1d": 360,
-  "1h": 360,
-  "30m": 60,
-  "15m": 60,
+  "1d": 5,
+  "1h": 5,
+  "30m": 3,
+  "15m": 3,
 }
 
 # yfinance period / interval 映射
