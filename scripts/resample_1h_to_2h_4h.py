@@ -25,7 +25,7 @@ def resample_df(df: pd.DataFrame, interval: str) -> pd.DataFrame:
         'close': 'last',
         'volume': 'sum',
     }
-    resampled = df.resample(interval).apply(agg).dropna()
+    resampled = df.resample(interval, offset='9h30min').apply(agg).dropna()
     return resampled.reset_index()
 
 def generate_higher_intervals(data_dir: Path, allowed_codes: set) -> None:
