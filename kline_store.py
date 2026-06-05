@@ -259,14 +259,25 @@ def _update_source_level(
 def _reaggregate_from_1h(code: str, target: Literal["2h", "4h"]) -> LevelUpdateResult:
   """从 1H 重新聚合 2H 或 4H。
 
-  策略：删除 (code, target) 在 [now - REAGG_WINDOW_DAYS, ∞) 的所有 bar，
-  然后从 1H 完整重算后 UPSERT 回去。窗口外的历史不动。
+  首次运行（DB 无旧数据）：基于全部 1H 数据全量聚合。
+  增量运行：删除 [now - REAGG_WINDOW_DAYS, ∞) 的 bar 后重算，
+  窗口外的历史不动。
   """
-  logger.info("[REAGG] code=%s level=%s start - will delete and re-aggregate from 1h", code, target)
-  cutoff = datetime.now() - timedelta(days=REAGG_WINDOW_DAYS)
+  with engine.connect() as conn:
+    latest = db.get_latest_kline_time(conn, code, target)
 
-  with engine.begin() as conn:
-    db.delete_kline_range(conn, code, target, begin_date=cutoff)
+  if latest is None:
+    cutoff = None
+    logger.info(
+      "[REAGG] code=%s level=%s first_run - will aggregate all 1h data", code, target
+    )
+  else:
+    cutoff = datetime.now() - timedelta(days=REAGG_WINDOW_DAYS)
+    with engine.begin() as conn:
+      db.delete_kline_range(conn, code, target, begin_date=cutoff)
+    logger.info("[REAGG] code=%s level=%s incremental cutoff=%s", code, target, cutoff)
+
+  with engine.connect() as conn:
     df_1h = db.read_kline(conn, code, "1h")
 
   logger.info("[REAGG] code=%s level=%s read 1h rows=%s", code, target, len(df_1h))
@@ -278,12 +289,22 @@ def _reaggregate_from_1h(code: str, target: Literal["2h", "4h"]) -> LevelUpdateR
   hours = 2 if target == "2h" else 4
   agg_fn = aggregate_intraday_24x7 if _is_crypto(code) else aggregate_intraday
   df_agg = agg_fn(df_1h, hours)
-  logger.info("[REAGG] code=%s level=%s aggregated to %s rows (hours=%s, fn=%s)", code, target, len(df_agg), hours, agg_fn.__name__)
+  logger.info(
+    "[REAGG] code=%s level=%s aggregated to %s rows (hours=%s, fn=%s)",
+    code,
+    target,
+    len(df_agg),
+    hours,
+    agg_fn.__name__,
+  )
   if df_agg.empty:
     return LevelUpdateResult(code=code, level=target)
 
   df_agg["time"] = pd.to_datetime(df_agg["time"])
-  df_agg_new = df_agg[df_agg["time"] >= pd.Timestamp(cutoff)].copy()
+  if cutoff is not None:
+    df_agg_new = df_agg[df_agg["time"] >= pd.Timestamp(cutoff)].copy()
+  else:
+    df_agg_new = df_agg
   if df_agg_new.empty:
     return LevelUpdateResult(code=code, level=target)
 
