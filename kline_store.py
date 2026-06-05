@@ -9,6 +9,7 @@ Responsibilities:
   2. Aggregate 2H / 4H from 1H (delete-then-rewrite last 7 days)
   3. Read DataFrame (used by CChan custom data sources)
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,22 +45,22 @@ YFINANCE_INTERVAL: dict[str, str] = {
 }
 
 YFINANCE_PERIOD: dict[str, str] = {
-  "1d": "20y",      # 冷启动全量
-  "1h": "730d",     # yfinance 1H 最多 730 天
-  "30m": "60d",     # yfinance 30M 最多 60 天
-  "15m": "60d",     # yfinance 15M 最多 60 天
+  "1d": "20y",  # 冷启动全量
+  "1h": "730d",  # yfinance 1H 最多 730 天
+  "30m": "60d",  # yfinance 30M 最多 60 天
+  "15m": "60d",  # yfinance 15M 最多 60 天
 }
 
 # 2H/4H 重聚合窗口（覆盖最近 N 天，超出窗口的历史 2H/4H 不动）
-REAGG_WINDOW_DAYS = 7
+REAGG_WINDOW_DAYS = 5
 
 
 @dataclass
 class LevelUpdateResult:
   code: str
   level: str
-  fetched: int = 0       # 拉取的行数
-  upserted: int = 0      # 实际写入的行数
+  fetched: int = 0  # 拉取的行数
+  upserted: int = 0  # 实际写入的行数
   latest_time: datetime | None = None
   success: bool = True
   error: str | None = None
@@ -109,7 +110,9 @@ def _align_intraday_end_time(df: pd.DataFrame, level: Level) -> pd.DataFrame:
   """把 yfinance 返回的 intraday K线时间对齐到 bar 结束时刻。"""
   bar_minutes = {"1h": 60, "30m": 30, "15m": 15}[level]
   out = df.copy()
-  out["time"] = out["time"].apply(lambda x: _apply_intraday_bar_end_time(x, bar_minutes))
+  out["time"] = out["time"].apply(
+    lambda x: _apply_intraday_bar_end_time(x, bar_minutes)
+  )
   return out[["time", "open", "high", "low", "close", "volume"]]
 
 
@@ -127,7 +130,9 @@ def _df_to_rows(df: pd.DataFrame) -> list[dict]:
   ]
 
 
-def _update_source_level(code: str, level: Literal["1d", "1h", "30m", "15m"]) -> LevelUpdateResult:
+def _update_source_level(
+  code: str, level: Literal["1d", "1h", "30m", "15m"]
+) -> LevelUpdateResult:
   """拉取并 UPSERT 一个 source level (1D/1H/30M/15M)。
 
   - 首次（DB 中无数据）：全量拉取（period=20y/730d/60d）
@@ -140,7 +145,8 @@ def _update_source_level(code: str, level: Literal["1d", "1h", "30m", "15m"]) ->
     start = None
   else:
     if level in ("30m", "15m"):
-      start = None
+      backfill = PULL_BACKFILL_DAYS[level]
+      start = (latest - timedelta(days=backfill)).strftime("%Y-%m-%d")
     else:
       backfill = PULL_BACKFILL_DAYS[level]
       start = (latest - timedelta(days=backfill)).strftime("%Y-%m-%d")
@@ -161,11 +167,18 @@ def _update_source_level(code: str, level: Literal["1d", "1h", "30m", "15m"]) ->
 
   logger.info(
     "[UPDATE] code=%s level=%s fetched=%s upserted=%s latest=%s",
-    code, level, len(df), written, new_latest,
+    code,
+    level,
+    len(df),
+    written,
+    new_latest,
   )
   return LevelUpdateResult(
-    code=code, level=level,
-    fetched=len(df), upserted=written, latest_time=new_latest,
+    code=code,
+    level=level,
+    fetched=len(df),
+    upserted=written,
+    latest_time=new_latest,
   )
 
 
@@ -201,15 +214,25 @@ def _reaggregate_from_1h(code: str, target: Literal["2h", "4h"]) -> LevelUpdateR
 
   logger.info(
     "[REAGG] code=%s level=%s source_1h_rows=%s agg_rows=%s upserted=%s latest=%s",
-    code, target, len(df_1h), len(df_agg_new), written, new_latest,
+    code,
+    target,
+    len(df_1h),
+    len(df_agg_new),
+    written,
+    new_latest,
   )
   return LevelUpdateResult(
-    code=code, level=target,
-    fetched=len(df_1h), upserted=written, latest_time=new_latest,
+    code=code,
+    level=target,
+    fetched=len(df_1h),
+    upserted=written,
+    latest_time=new_latest,
   )
 
 
-def ensure_levels_updated(codes: list[str], levels: list[str]) -> list[LevelUpdateResult]:
+def ensure_levels_updated(
+  codes: list[str], levels: list[str]
+) -> list[LevelUpdateResult]:
   """确保 (code, level) 在 DB 中是最新数据。
 
   - source levels (1d/1h/30m/15m): 首次全量，之后增量（带回溯缓冲）
@@ -257,12 +280,17 @@ def ensure_levels_updated(codes: list[str], levels: list[str]) -> list[LevelUpda
   return results
 
 
-def read_kline_df(code: str, level: str, begin_date=None, end_date=None) -> pd.DataFrame:
+def read_kline_df(
+  code: str, level: str, begin_date=None, end_date=None
+) -> pd.DataFrame:
   """供 CChan custom data source 使用的读取入口（按 time 升序）。"""
   with engine.connect() as conn:
     return db.read_kline(
-      conn, code, level.lower(),
-      begin_date=begin_date, end_date=end_date,
+      conn,
+      code,
+      level.lower(),
+      begin_date=begin_date,
+      end_date=end_date,
     )
 
 
@@ -327,18 +355,28 @@ def backfill_from_csv(codes: list[str], levels: list[str]) -> list[LevelUpdateRe
       try:
         csv_path = _glob_csv_for(code, level)
         if not csv_path:
-          results.append(LevelUpdateResult(
-            code=code, level=level, success=True, error="csv not found, skipped",
-          ))
+          results.append(
+            LevelUpdateResult(
+              code=code,
+              level=level,
+              success=True,
+              error="csv not found, skipped",
+            )
+          )
           continue
 
         with engine.begin() as conn:
           existing = db.get_latest_kline_time(conn, code, level)
         if existing is not None:
-          results.append(LevelUpdateResult(
-            code=code, level=level, latest_time=existing,
-            success=True, error="already in db, skipped",
-          ))
+          results.append(
+            LevelUpdateResult(
+              code=code,
+              level=level,
+              latest_time=existing,
+              success=True,
+              error="already in db, skipped",
+            )
+          )
           continue
 
         df = _read_csv_to_df(csv_path)
@@ -350,16 +388,32 @@ def backfill_from_csv(codes: list[str], levels: list[str]) -> list[LevelUpdateRe
 
         logger.info(
           "[BACKFILL] code=%s level=%s csv=%s rows=%s upserted=%s latest=%s",
-          code, level, csv_path, len(df), written, new_latest,
+          code,
+          level,
+          csv_path,
+          len(df),
+          written,
+          new_latest,
         )
-        results.append(LevelUpdateResult(
-          code=code, level=level, fetched=len(df), upserted=written,
-          latest_time=new_latest, success=True,
-        ))
+        results.append(
+          LevelUpdateResult(
+            code=code,
+            level=level,
+            fetched=len(df),
+            upserted=written,
+            latest_time=new_latest,
+            success=True,
+          )
+        )
       except Exception as e:
         logger.exception("[BACKFILL] code=%s level=%s failed: %s", code, level, e)
-        results.append(LevelUpdateResult(
-          code=code, level=level, success=False, error=str(e),
-        ))
+        results.append(
+          LevelUpdateResult(
+            code=code,
+            level=level,
+            success=False,
+            error=str(e),
+          )
+        )
 
   return results
