@@ -164,3 +164,38 @@ def aggregate_intraday(df_1h: pd.DataFrame, hours: int) -> pd.DataFrame:
 
   agg["time"] = agg["time"].apply(lambda x: _apply_intraday_bar_end_time(x, hours * 60))
   return agg[["time", "open", "high", "low", "close", "volume"]]
+
+
+def aggregate_intraday_24x7(df_1h: pd.DataFrame, hours: int) -> pd.DataFrame:
+  """从 1H K线聚合出 2H 或 4H（24×7 交易品种专用，如 BTC/ETH）。
+
+  按连续 hours 小时分组，time 取组内第一条时间。
+  支持 hours=2 或 hours=4。
+  """
+  if hours not in (2, 4):
+    raise ValueError(f"unsupported 24x7 aggregate hours: {hours}")
+
+  df = df_1h.copy()
+  df["time"] = pd.to_datetime(df["time"], errors="coerce")
+  df = df.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+
+  df["trade_date"] = df["time"].dt.date
+  df["hour"] = df["time"].dt.hour
+  df["bucket"] = df["hour"] // hours
+
+  agg = (
+    df.groupby(["trade_date", "bucket"], sort=True)
+    .agg(
+      time=("time", "first"),
+      open=("open", "first"),
+      high=("high", "max"),
+      low=("low", "min"),
+      close=("close", "last"),
+      volume=("volume", "sum"),
+    )
+    .reset_index(drop=True)
+    .sort_values("time")
+    .reset_index(drop=True)
+  )
+
+  return agg[["time", "open", "high", "low", "close", "volume"]]

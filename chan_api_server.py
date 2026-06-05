@@ -572,7 +572,12 @@ def analyze_chan(req: ChanAnalyzeRequest):
 
     # ---- 2️⃣ 原有流程（若未命中） ----
     # kline_store 会按需从 yfinance 拉增量，并保证 (code, level) 在 DB 中是最新的
-    kline_store.ensure_levels_updated([code], [level])
+    results = kline_store.ensure_levels_updated([code], [level])
+    for r in results:
+      if not r.success:
+        logger.warning("[UPDATE] code=%s level=%s update_failed: %s", r.code, r.level, r.error)
+      else:
+        logger.info("[UPDATE] code=%s level=%s ok fetched=%s upserted=%s", r.code, r.level, r.fetched, r.upserted)
 
     # 旧版 csv_path 只用于响应 cache_file 字段和日志；DB 模式下用合成路径占位
     synthetic_path = f"kline://{code}/{level.lower()}"

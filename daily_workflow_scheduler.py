@@ -21,7 +21,7 @@ except Exception:
   BlockingScheduler = None
   CronTrigger = None
 
-LevelType = Literal["1D", "4H", "2H", "1H", "30M", "15M"]
+LevelType = Literal["1D", "1H", "2H", "4H", "30M", "15M"]
 
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = "/tmp/daily_workflow_scheduler.log"
@@ -46,7 +46,7 @@ DEFAULT_SYMBOLS = [
   "BTC-USD",
   "ETH-USD",
 ]
-DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H", "30M", "15M"]
+DEFAULT_LEVELS: list[LevelType] = ["1D", "1H", "2H", "4H", "30M", "15M"]
 
 scheduler = None
 

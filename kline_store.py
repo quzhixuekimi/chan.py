@@ -22,9 +22,20 @@ import pandas as pd
 
 import db
 from db import engine
-from kline_aggregation import _apply_intraday_bar_end_time, aggregate_intraday
+from kline_aggregation import (
+  _apply_intraday_bar_end_time,
+  aggregate_intraday,
+  aggregate_intraday_24x7,
+)
 
 logger = logging.getLogger("kline_store")
+logger.setLevel(logging.INFO)
+kline_store_handler = logging.FileHandler("/tmp/chan_api_server.log", encoding="utf-8")
+kline_store_handler.setFormatter(
+  logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+)
+logger.addHandler(kline_store_handler)
+
 
 Level = Literal["1d", "1h", "2h", "4h", "30m", "15m"]
 
@@ -32,6 +43,7 @@ Level = Literal["1d", "1h", "2h", "4h", "30m", "15m"]
 PULL_BACKFILL_DAYS: dict[str, int] = {
   "1d": 5,
   "1h": 5,
+  "4h": 5,
   "30m": 3,
   "15m": 3,
 }
@@ -40,15 +52,17 @@ PULL_BACKFILL_DAYS: dict[str, int] = {
 YFINANCE_INTERVAL: dict[str, str] = {
   "1d": "1d",
   "1h": "60m",
+  "4h": "4h",
   "30m": "30m",
   "15m": "15m",
 }
 
 YFINANCE_PERIOD: dict[str, str] = {
-  "1d": "20y",  # 冷启动全量
-  "1h": "730d",  # yfinance 1H 最多 730 天
-  "30m": "60d",  # yfinance 30M 最多 60 天
-  "15m": "60d",  # yfinance 15M 最多 60 天
+  "1d": "20y",
+  "1h": "730d",
+  "4h": "730d",
+  "30m": "60d",
+  "15m": "60d",
 }
 
 # 2H/4H 重聚合窗口（覆盖最近 N 天，超出窗口的历史 2H/4H 不动）
@@ -66,8 +80,52 @@ class LevelUpdateResult:
   error: str | None = None
 
 
+def _is_crypto(code: str) -> bool:
+  return code.upper() in ("BTC-USD", "ETH-USD")
+
+
 def _fetch_yfinance(code: str, level: Level, start: str | None) -> pd.DataFrame:
   """从 yfinance 拉取指定 level 的 K线。start=None 表示走 period 全量。"""
+  import yfinance as yf
+
+  ticker = yf.Ticker(code.upper())
+
+  kwargs: dict = dict(
+    interval=YFINANCE_INTERVAL[level],
+    auto_adjust=False,
+    actions=False,
+  )
+  if start:
+    kwargs["start"] = start
+  else:
+    kwargs["period"] = YFINANCE_PERIOD[level]
+
+  df = ticker.history(**kwargs)
+  if df is None or df.empty:
+    raise ValueError(f"yfinance returns empty data for {code} {level}")
+
+  df = df.reset_index()
+  time_col = "Date" if "Date" in df.columns else "Datetime"
+  df = df.rename(
+    columns={
+      time_col: "time",
+      "Open": "open",
+      "High": "high",
+      "Low": "low",
+      "Close": "close",
+      "Volume": "volume",
+    }
+  )
+  df = df[["time", "open", "high", "low", "close", "volume"]].copy()
+  df["time"] = pd.to_datetime(df["time"], errors="coerce")
+  df = df.dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+  if getattr(df["time"].dt, "tz", None) is not None:
+    df["time"] = df["time"].dt.tz_localize(None)
+  return df
+
+
+def _fetch_btc_eth_yfinance(code: str, level: Level, start: str | None) -> pd.DataFrame:
+  """从 yfinance 拉取 BTC/ETH 指定 level 的 K线。BTC/ETH 支持 7x24，交易数据齐全。"""
   import yfinance as yf
 
   ticker = yf.Ticker(code.upper())
@@ -138,25 +196,41 @@ def _update_source_level(
   - 首次（DB 中无数据）：全量拉取（period=20y/730d/60d）
   - 非首次：start = latest_time - backfill_days，捕获 yfinance 复权修正
   """
+  logger.info("[UPDATE] code=%s level=%s start=_update_source_level", code, level)
   with engine.begin() as conn:
     latest = db.get_latest_kline_time(conn, code, level)
 
   if latest is None:
     start = None
+    logger.info("[UPDATE] code=%s level=%s mode=full (no data in db)", code, level)
   else:
-    if level in ("30m", "15m"):
-      backfill = PULL_BACKFILL_DAYS[level]
-      start = (latest - timedelta(days=backfill)).strftime("%Y-%m-%d")
-    else:
-      backfill = PULL_BACKFILL_DAYS[level]
-      start = (latest - timedelta(days=backfill)).strftime("%Y-%m-%d")
+    backfill = PULL_BACKFILL_DAYS[level]
+    start = (latest - timedelta(days=backfill)).strftime("%Y-%m-%d")
+    logger.info(
+      "[UPDATE] code=%s level=%s mode=incremental start=%s latest=%s",
+      code,
+      level,
+      start,
+      latest,
+    )
 
-  df = _fetch_yfinance(code, level, start=start)
+  try:
+    if _is_crypto(code):
+      df = _fetch_btc_eth_yfinance(code, level, start=start)
+    else:
+      df = _fetch_yfinance(code, level, start=start)
+    logger.info("[UPDATE] code=%s level=%s fetch_ok rows=%s", code, level, len(df))
+  except Exception as e:
+    logger.exception("[UPDATE] code=%s level=%s fetch_failed: %s", code, level, e)
+    return LevelUpdateResult(code=code, level=level, success=False, error=str(e))
+
   if df.empty:
+    logger.info("[UPDATE] code=%s level=%s empty dataframe, skipping", code, level)
     return LevelUpdateResult(code=code, level=level, latest_time=latest)
 
   if level in ("1h", "30m", "15m"):
-    df = _align_intraday_end_time(df, level)
+    if not _is_crypto(code):
+      df = _align_intraday_end_time(df, level)
   else:
     df = df[["time", "open", "high", "low", "close", "volume"]].copy()
 
@@ -188,17 +262,23 @@ def _reaggregate_from_1h(code: str, target: Literal["2h", "4h"]) -> LevelUpdateR
   策略：删除 (code, target) 在 [now - REAGG_WINDOW_DAYS, ∞) 的所有 bar，
   然后从 1H 完整重算后 UPSERT 回去。窗口外的历史不动。
   """
+  logger.info("[REAGG] code=%s level=%s start - will delete and re-aggregate from 1h", code, target)
   cutoff = datetime.now() - timedelta(days=REAGG_WINDOW_DAYS)
 
   with engine.begin() as conn:
     db.delete_kline_range(conn, code, target, begin_date=cutoff)
     df_1h = db.read_kline(conn, code, "1h")
 
+  logger.info("[REAGG] code=%s level=%s read 1h rows=%s", code, target, len(df_1h))
+
   if df_1h.empty:
+    logger.warning("[REAGG] code=%s level=%s skipped - no 1h data in db", code, target)
     return LevelUpdateResult(code=code, level=target)
 
   hours = 2 if target == "2h" else 4
-  df_agg = aggregate_intraday(df_1h, hours)
+  agg_fn = aggregate_intraday_24x7 if _is_crypto(code) else aggregate_intraday
+  df_agg = agg_fn(df_1h, hours)
+  logger.info("[REAGG] code=%s level=%s aggregated to %s rows (hours=%s, fn=%s)", code, target, len(df_agg), hours, agg_fn.__name__)
   if df_agg.empty:
     return LevelUpdateResult(code=code, level=target)
 
@@ -248,6 +328,14 @@ def ensure_levels_updated(
   lvl_set = {l.lower() for l in levels}
   source_levels = [l for l in lvl_set if l in ("1d", "1h", "30m", "15m")]
   derived_levels = [l for l in lvl_set if l in ("2h", "4h")]
+
+  for code in codes:
+    is_crypto = _is_crypto(code)
+    if is_crypto:
+      if "4h" in derived_levels:
+        derived_levels = [l for l in derived_levels if l != "4h"]
+        if "4h" not in source_levels:
+          source_levels = list(source_levels) + ["4h"]
 
   # 1H 必须在 2H/4H 之前更新
   needs_1h = ("1h" in source_levels) or bool(derived_levels)
