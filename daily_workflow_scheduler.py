@@ -37,13 +37,14 @@ DEFAULT_SYMBOLS = [
   "OKLO",
   "SOXL",
   "AMD",
-  "HIMS",
   "QUBT",
   "MU",
   "GOOG",
   "AVGO",
   "ORCL",
-  "TEM",
+  "META",
+  "BTC-USD",
+  "ETH-USD",
 ]
 DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H", "30M", "15M"]
 

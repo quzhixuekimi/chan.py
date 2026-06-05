@@ -192,6 +192,7 @@ def delete_old_cache_for_code(conn, code: str, today: date):
     api_response_cache.c.code == code,
     api_response_cache.c.today < today,
   )
+  conn.execute(stmt)
 
 
 def set_cached(conn, code: str, level: str, endpoint: str, today: date, content_json):
