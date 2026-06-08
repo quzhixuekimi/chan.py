@@ -313,6 +313,16 @@ class NightlyExecutor:
           signal_id = signal.get("id", "")
           logger.info(f"开始处理信号: symbol={symbol}, action={action}, id={signal_id}")
 
+          # Crypto → ETF 映射（虚拟账户只支持美股代码）
+          CRYPTO_ETF_MAP = {"BTC-USD": "IBIT", "ETH-USD": "ETHA"}
+          if symbol in CRYPTO_ETF_MAP:
+            trade_symbol = CRYPTO_ETF_MAP[symbol]
+            trade_qty = 10
+            logger.info(f"[CRYPTO-ETF] {symbol} -> {trade_symbol} qty={trade_qty}")
+          else:
+            trade_symbol = symbol
+            trade_qty = self.config.order_qty
+
           if action == "manual_review":
             results.append(
               {
@@ -344,9 +354,9 @@ class NightlyExecutor:
               continue
 
           result = await execute_order(
-            symbol=symbol,
+            symbol=trade_symbol,
             action=action,
-            qty=self.config.order_qty,
+            qty=trade_qty,
             trd_ctx=self.trd_ctx,
           )
 
