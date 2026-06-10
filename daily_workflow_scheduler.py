@@ -77,7 +77,7 @@ class WorkflowConfig:
   notify_digest_file: str | None = None
   continue_on_notify_error: bool = True
 
-  retry_delay_hours: int = 2
+  retry_delay_hours: int = 1
   retry_max_attempts: int = 3
 
 
@@ -803,7 +803,7 @@ def main() -> None:
   parser.add_argument(
     "--retry-delay-hours",
     type=int,
-    default=2,
+    default=1,
     help="Retry delay hours after workflow failure. Default: 2",
   )
   parser.add_argument(
