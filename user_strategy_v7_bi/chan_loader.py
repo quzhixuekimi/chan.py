@@ -14,7 +14,6 @@ from Bi.Bi import CBi
 def load_chan_data(
   code: str,
   level: str,
-  csv_path: Path,
   config: dict,
   trigger_step: bool = True,
   begin_time: Optional[str] = None,

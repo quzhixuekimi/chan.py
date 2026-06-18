@@ -11,6 +11,7 @@ from sqlalchemy import (
   Date,
   JSON,
   TIMESTAMP,
+  Numeric,
   UniqueConstraint,
   create_engine,
   select,
@@ -185,9 +186,6 @@ def get_cached(conn, code: str, level: str, endpoint: str, today: date):
     return None
 
 
-import logging
-
-
 def delete_old_cache_for_code(conn, code: str, today: date):
   """删除指定 code 中早于 today 的缓存记录（每天首次调用 API 时执行一次）"""
   stmt = api_response_cache.delete().where(
@@ -285,3 +283,147 @@ def insert_trade(conn, code: str, action: str, strategy: str, order_id: str):
     .on_conflict_do_nothing(index_elements=["code", "action", "strategy", "order_id"])
   )
   conn.execute(stmt)
+
+
+# ---------------------------------------------------------------------------
+# kline 表: K线数据（所有股票、所有周期共用一张表）
+# 与 migrations/001_kline_table.sql 保持一致
+# ---------------------------------------------------------------------------
+kline = Table(
+  "kline",
+  metadata,
+  Column("id", BigInteger, primary_key=True, autoincrement=True),
+  Column("code", Text, nullable=False),
+  Column("level", Text, nullable=False),
+  Column("time", TIMESTAMP, nullable=False),
+  Column("open", Numeric(18, 6), nullable=False),
+  Column("high", Numeric(18, 6), nullable=False),
+  Column("low", Numeric(18, 6), nullable=False),
+  Column("close", Numeric(18, 6), nullable=False),
+  Column("volume", BigInteger, nullable=False, default=0),
+  Column("updated_at", TIMESTAMP(timezone=True), server_default=text("now()")),
+  UniqueConstraint("code", "level", "time", name="unique_kline_natural"),
+)
+
+
+# ---------------------------------------------------------------------------
+# kline helpers
+# ---------------------------------------------------------------------------
+def get_latest_kline_time(conn, code: str, level: str):
+  """返回 (code, level) 在 kline 表中最新一条 bar 的 time，未找到返回 None。"""
+  stmt = (
+    select(kline.c.time)
+    .where(kline.c.code == code, kline.c.level == level)
+    .order_by(kline.c.time.desc())
+    .limit(1)
+  )
+  row = conn.execute(stmt).first()
+  return row[0] if row else None
+
+
+def upsert_kline(conn, code: str, level: str, rows: list[dict]) -> int:
+  """批量 UPSERT K线数据，按 (code, level, time) 自然键去重。
+  rows 中每条 dict 需包含: time (datetime), open, high, low, close, volume。
+  返回受影响的行数（INSERT+UPDATE 合计）。"""
+  if not rows:
+    return 0
+
+  from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+  values = [
+    {
+      "code": code,
+      "level": level,
+      "time": r["time"],
+      "open": r["open"],
+      "high": r["high"],
+      "low": r["low"],
+      "close": r["close"],
+      "volume": int(r.get("volume") or 0),
+    }
+    for r in rows
+  ]
+
+  stmt = pg_insert(kline).values(values)
+  stmt = stmt.on_conflict_do_update(
+    index_elements=["code", "level", "time"],
+    set_={
+      "open": stmt.excluded.open,
+      "high": stmt.excluded.high,
+      "low": stmt.excluded.low,
+      "close": stmt.excluded.close,
+      "volume": stmt.excluded.volume,
+      "updated_at": text("now()"),
+    },
+  )
+  result = conn.execute(stmt)
+  return result.rowcount or 0
+
+
+def read_kline(conn, code: str, level: str, begin_date=None, end_date=None):
+  """读取 (code, level) 的 K线数据，按 time 升序，可选过滤 begin_date / end_date。
+  返回 pandas DataFrame，列: time, open, high, low, close, volume。"""
+  import pandas as pd
+  from datetime import datetime as _dt, timedelta as _td
+
+  def _to_dt(v):
+    if v is None:
+      return None
+    if isinstance(v, _dt):
+      return v
+    return pd.to_datetime(v).to_pydatetime()
+
+  begin_dt = _to_dt(begin_date)
+  end_dt = _to_dt(end_date)
+
+  stmt = select(
+    kline.c.time,
+    kline.c.open,
+    kline.c.high,
+    kline.c.low,
+    kline.c.close,
+    kline.c.volume,
+  ).where(kline.c.code == code, kline.c.level == level)
+  if begin_dt is not None:
+    stmt = stmt.where(kline.c.time >= begin_dt)
+  if end_dt is not None:
+    stmt = stmt.where(kline.c.time < end_dt + _td(days=1))
+  stmt = stmt.order_by(kline.c.time.asc())
+
+  rows = conn.execute(stmt).fetchall()
+  if not rows:
+    return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+
+  df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
+  df["time"] = pd.to_datetime(df["time"])
+  for c in ["open", "high", "low", "close"]:
+    df[c] = pd.to_numeric(df[c])
+  df["volume"] = df["volume"].astype("int64")
+  return df
+
+
+def delete_kline_range(
+  conn, code: str, level: str, begin_date=None, end_date=None
+) -> int:
+  """删除 (code, level) 在 [begin_date, end_date) 范围内的 K线。
+  用于 2H/4H 重新聚合时先清空目标区间。返回删除行数。"""
+  import pandas as pd
+  from datetime import datetime as _dt, timedelta as _td
+
+  def _to_dt(v):
+    if v is None:
+      return None
+    if isinstance(v, _dt):
+      return v
+    return pd.to_datetime(v).to_pydatetime()
+
+  begin_dt = _to_dt(begin_date)
+  end_dt = _to_dt(end_date)
+
+  stmt = kline.delete().where(kline.c.code == code, kline.c.level == level)
+  if begin_dt is not None:
+    stmt = stmt.where(kline.c.time >= begin_dt)
+  if end_dt is not None:
+    stmt = stmt.where(kline.c.time < end_dt + _td(days=1))
+  result = conn.execute(stmt)
+  return result.rowcount or 0

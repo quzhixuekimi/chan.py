@@ -21,7 +21,7 @@ except Exception:
   BlockingScheduler = None
   CronTrigger = None
 
-LevelType = Literal["1D", "4H", "2H", "1H", "30M", "15M"]
+LevelType = Literal["1D", "1H", "2H", "4H", "30M", "15M"]
 
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = "/tmp/daily_workflow_scheduler.log"
@@ -37,15 +37,16 @@ DEFAULT_SYMBOLS = [
   "OKLO",
   "SOXL",
   "AMD",
-  "HIMS",
   "QUBT",
   "MU",
   "GOOG",
   "AVGO",
   "ORCL",
-  "TEM",
+  "META",
+  "BTC-USD",
+  "ETH-USD",
 ]
-DEFAULT_LEVELS: list[LevelType] = ["1D", "4H", "2H", "1H", "30M", "15M"]
+DEFAULT_LEVELS: list[LevelType] = ["1D", "1H", "2H", "4H", "30M", "15M"]
 
 scheduler = None
 
@@ -76,7 +77,7 @@ class WorkflowConfig:
   notify_digest_file: str | None = None
   continue_on_notify_error: bool = True
 
-  retry_delay_hours: int = 2
+  retry_delay_hours: int = 1
   retry_max_attempts: int = 3
 
 
@@ -802,7 +803,7 @@ def main() -> None:
   parser.add_argument(
     "--retry-delay-hours",
     type=int,
-    default=2,
+    default=1,
     help="Retry delay hours after workflow failure. Default: 2",
   )
   parser.add_argument(

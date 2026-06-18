@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import kline_loader
 
 from user_strategy_v9_mr.config import StrategyConfig
 from user_strategy_v9_mr.backtest_engine import MRBacktester
@@ -541,24 +544,22 @@ def main():
   for symbol in all_symbols:
     print(f"\n{'=' * 40}\n正在处理股票: {symbol}\n{'=' * 40}")
 
+    kline_loader.ensure_kline_data([symbol], ["1D"])
+
     conf.symbol = symbol
     symbol_summary = []
     symbol_signal_events = []
     symbol_signal_digest = []
 
-    csv_path = pick_latest_1d_file(data_dir, symbol)
-    if not csv_path:
-      print(f" [!] 未找到 {symbol} 的 1d 数据文件，跳过")
-      continue
-
-    print(f" 处理时间框架: 1d (1D) -> {csv_path.name}")
+    print(f" 处理时间框架: 1d (1D)")
 
     try:
-      df = load_ohlcv(
-        csv_path,
-        start_time=conf.timeframes[0].start_time,
-        end_time=conf.timeframes[0].end_time,
+      df = kline_loader.load_kline_df(
+        symbol, "1d",
+        start=conf.timeframes[0].start_time,
+        end=conf.timeframes[0].end_time,
       )
+      df = df.rename(columns={"time": "dt"})
 
       bt = MRBacktester(
         symbol=symbol,

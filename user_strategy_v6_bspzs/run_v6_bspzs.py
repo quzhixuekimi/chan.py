@@ -7,20 +7,12 @@ import pandas as pd
 
 from .config import StrategyConfig
 from user_strategy_v6_bspzs.chan_loader import load_chan_data
+from daily_workflow_scheduler import DEFAULT_SYMBOLS
 
 
 def save_df(df: pd.DataFrame, path: Path) -> None:
   path.parent.mkdir(parents=True, exist_ok=True)
   df.to_csv(path, index=False, encoding="utf-8-sig")
-
-
-def get_all_symbols(data_dir: Path) -> List[str]:
-  symbols = set()
-  for file in data_dir.glob("*.csv"):
-    parts = file.name.split("_")
-    if parts:
-      symbols.add(parts[0])
-  return sorted(list(symbols))
 
 
 def normalize_timeframe(tf: str) -> str:
@@ -1197,7 +1189,7 @@ def main() -> None:
   out_dir = Path(__file__).resolve().parent / "results"
   out_dir.mkdir(parents=True, exist_ok=True)
 
-  symbols = getattr(conf, "symbols", None) or get_all_symbols(data_dir)
+  symbols = getattr(conf, "symbols", None) or DEFAULT_SYMBOLS.copy()
   symbols = [str(s).upper().strip() for s in symbols]
   print(f"symbols={len(symbols)} -> {symbols}")
 
@@ -1245,14 +1237,6 @@ def main() -> None:
 
     for tf in timeframes:
       try:
-        matches = find_csv_matches(data_dir, symbol, tf.level, tf.name)
-        if not matches:
-          print(f"{tf.name}/{tf.level} -> no csv found")
-          continue
-
-        # csvpath = matches[-1]
-        # print(f"{tf.name}/{tf.level} -> {csvpath.name}")
-
         _, _, kllist = load_chan_data(
           code=symbol,
           level=tf.level,
