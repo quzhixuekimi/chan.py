@@ -46,14 +46,14 @@ def _get_queue_dir() -> Path:
 
 BUY_PRIORITY = [
   "user_strategy_v7_bi",
-  "user_strategy_v5_macdtd",
   "user_strategy_v8_byma",
+  "user_strategy_v5_macdtd",
 ]
 
 SELL_PRIORITY = [
   "user_strategy_v7_bi",
-  "user_strategy_v5_macdtd",
   "user_strategy_v8_byma",
+  "user_strategy_v5_macdtd",
 ]
 
 # 只保留 30M / 1H / 2H / 4H，忽略 15M 和 1D
@@ -121,7 +121,7 @@ def _build_signal(
 
 
 def _pick_signal(buy_df: pd.DataFrame, sell_df: pd.DataFrame) -> Signal | None:
-  """按优先级从 buy_df / sell_df 中选一个信号。"""
+  """按策略优先级 + 周期优先级串行检查，选择买卖信号。"""
   buy_list = [
     r for r in buy_df.to_dict("records") if str(r.get("action")).lower() == "buy"
   ]
@@ -129,154 +129,93 @@ def _pick_signal(buy_df: pd.DataFrame, sell_df: pd.DataFrame) -> Signal | None:
     r for r in sell_df.to_dict("records") if str(r.get("action")).lower() == "sell"
   ]
 
-  def _best_candidate(rows: list[dict], priority_strategies: list[str]) -> dict | None:
-    # 只保留允许参与队列生成的周期，忽略 15M / 1D / 其他非白名单周期
+  def _find_signal(rows: list[dict], priority_strategies: list[str]) -> dict | None:
     filtered_rows = [r for r in rows if r.get("period") in PERIOD_PRIORITY]
     if not filtered_rows:
       return None
-
-    # Return the single best row according to strategy priority then period priority
     for strat in priority_strategies:
       for period in PERIOD_PRIORITY:
         for r in filtered_rows:
           if r.get("strategy") == strat and r.get("period") == period:
             return r
+    return None
 
-    # fallback: prefer first row with any non-empty strategy/period, else first row
-    for r in filtered_rows:
-      if r.get("strategy") or r.get("period"):
-        return r
-    return filtered_rows[0]
+  best_buy = _find_signal(buy_list, BUY_PRIORITY)
+  best_sell = _find_signal(sell_list, SELL_PRIORITY)
 
-  # If both buy and sell exist, resolve by comparing the best candidates' priorities
-  if buy_list and sell_list:
-    best_buy = _best_candidate(buy_list, BUY_PRIORITY)
-    best_sell = _best_candidate(sell_list, SELL_PRIORITY)
+  if best_buy is None and best_sell is None:
+    return None
 
-    if best_buy is None and best_sell is None:
-      return None
-
-    if best_buy is None:
-      return _build_signal(
-        best_sell["symbol"],
-        "sell",
-        best_sell.get("strategy", ""),
-        best_sell.get("period", ""),
-        best_sell,
-      )
-
-    if best_sell is None:
-      return _build_signal(
-        best_buy["symbol"],
-        "buy",
-        best_buy.get("strategy", ""),
-        best_buy.get("period", ""),
-        best_buy,
-      )
-
-    # compute strategy rank (lower index = higher priority)
-    def _rank_strategy(strategy_name: str, priority_list: list[str]) -> int:
-      try:
-        return priority_list.index(strategy_name)
-      except ValueError:
-        return len(priority_list)
-
-    buy_rank = _rank_strategy(best_buy.get("strategy", ""), BUY_PRIORITY)
-    sell_rank = _rank_strategy(best_sell.get("strategy", ""), SELL_PRIORITY)
-
-    # check conflict: v5 vs v8 in same period, opposite actions
-    # only when v7_bi is not involved (i.e., both ranks > 0)
-    if buy_rank > 0 and sell_rank > 0:
-      buy_strategy = best_buy.get("strategy", "")
-      sell_strategy = best_sell.get("strategy", "")
-      if (
-        ((buy_strategy == "user_strategy_v5_macdtd" and sell_strategy == "user_strategy_v8_byma") or
-         (buy_strategy == "user_strategy_v8_byma" and sell_strategy == "user_strategy_v5_macdtd"))
-        and best_buy.get("period") == best_sell.get("period")
-        and best_buy.get("action", "").lower() != best_sell.get("action", "").lower()
-      ):
-        return _build_signal(
-          best_buy.get("symbol", best_sell.get("symbol", "")),
-          "",
-          "conflict",
-          best_buy.get("period", "N/A"),
-          best_buy or best_sell,
-          status="manual_review",
-        )
-
-    # If one side has a strictly higher strategy priority, pick it
-    if buy_rank < sell_rank:
-      return _build_signal(
-        best_buy["symbol"],
-        "buy",
-        best_buy.get("strategy", ""),
-        best_buy.get("period", ""),
-        best_buy,
-      )
-
-    if sell_rank < buy_rank:
-      return _build_signal(
-        best_sell["symbol"],
-        "sell",
-        best_sell.get("strategy", ""),
-        best_sell.get("period", ""),
-        best_sell,
-      )
-
-    # If strategy ranks tie, use period priority
-    def _period_index(period_label: str) -> int:
-      try:
-        return PERIOD_PRIORITY.index(period_label)
-      except ValueError:
-        return len(PERIOD_PRIORITY)
-
-    buy_period_idx = _period_index(best_buy.get("period", ""))
-    sell_period_idx = _period_index(best_sell.get("period", ""))
-
-    if buy_period_idx < sell_period_idx:
-      return _build_signal(
-        best_buy["symbol"],
-        "buy",
-        best_buy.get("strategy", ""),
-        best_buy.get("period", ""),
-        best_buy,
-      )
-
-    if sell_period_idx < buy_period_idx:
-      return _build_signal(
-        best_sell["symbol"],
-        "sell",
-        best_sell.get("strategy", ""),
-        best_sell.get("period", ""),
-        best_sell,
-      )
-
-    # If still tied (unlikely), mark manual review and attach conflict info
+  if best_buy is None:
     return _build_signal(
-      best_buy.get("symbol", best_sell.get("symbol", "")),
-      "",
-      "conflict",
-      "N/A",
-      best_buy or best_sell,
-      status="manual_review",
+      best_sell["symbol"],
+      "sell",
+      best_sell.get("strategy", ""),
+      best_sell.get("period", ""),
+      best_sell,
     )
 
-  # Only buy candidates
-  if buy_list:
-    r = _best_candidate(buy_list, BUY_PRIORITY)
-    if r is None:
-      return None
+  if best_sell is None:
     return _build_signal(
-      r["symbol"], "buy", r.get("strategy", ""), r.get("period", ""), r
+      best_buy["symbol"],
+      "buy",
+      best_buy.get("strategy", ""),
+      best_buy.get("period", ""),
+      best_buy,
     )
 
-  # Only sell candidates
-  if sell_list:
-    r = _best_candidate(sell_list, SELL_PRIORITY)
-    if r is None:
-      return None
+  def _rank_strategy(strategy_name: str, priority_list: list[str]) -> int:
+    try:
+      return priority_list.index(strategy_name)
+    except ValueError:
+      return len(priority_list)
+
+  buy_rank = _rank_strategy(best_buy.get("strategy", ""), BUY_PRIORITY)
+  sell_rank = _rank_strategy(best_sell.get("strategy", ""), SELL_PRIORITY)
+
+  if buy_rank < sell_rank:
     return _build_signal(
-      r["symbol"], "sell", r.get("strategy", ""), r.get("period", ""), r
+      best_buy["symbol"],
+      "buy",
+      best_buy.get("strategy", ""),
+      best_buy.get("period", ""),
+      best_buy,
+    )
+
+  if sell_rank < buy_rank:
+    return _build_signal(
+      best_sell["symbol"],
+      "sell",
+      best_sell.get("strategy", ""),
+      best_sell.get("period", ""),
+      best_sell,
+    )
+
+  def _period_index(period_label: str) -> int:
+    try:
+      return PERIOD_PRIORITY.index(period_label)
+    except ValueError:
+      return len(PERIOD_PRIORITY)
+
+  buy_period_idx = _period_index(best_buy.get("period", ""))
+  sell_period_idx = _period_index(best_sell.get("period", ""))
+
+  if buy_period_idx < sell_period_idx:
+    return _build_signal(
+      best_buy["symbol"],
+      "buy",
+      best_buy.get("strategy", ""),
+      best_buy.get("period", ""),
+      best_buy,
+    )
+
+  if sell_period_idx < buy_period_idx:
+    return _build_signal(
+      best_sell["symbol"],
+      "sell",
+      best_sell.get("strategy", ""),
+      best_sell.get("period", ""),
+      best_sell,
     )
 
   return None
