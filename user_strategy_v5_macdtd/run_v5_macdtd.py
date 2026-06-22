@@ -264,11 +264,7 @@ def build_symbol_digest(all_events: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         valid = valid[valid.str.match(r"\d{4}-\d{2}-\d{2}")]
         if not valid.empty:
           symbol_dates.append(valid.max())
-    ref_date = (
-      pd.to_datetime(max(symbol_dates)).strftime("%Y/%m/%d")
-      if symbol_dates
-      else pd.Timestamp.today().strftime("%Y/%m/%d")
-    )
+    ref_date = pd.Timestamp.today().strftime("%Y/%m/%d")
     item = {
       "symbol": symbol,
       "reference_date": ref_date,
@@ -367,7 +363,7 @@ def build_market_digest(market_events: List[pd.DataFrame]) -> pd.DataFrame:
       "symbol": symbol,
       "reference_date": ref_date,
       "signal_date": ref_date,
-      "fresh_days": 2,
+"fresh_days": 4,
     }
 
     sym_ev = combined[combined["symbol"] == symbol]

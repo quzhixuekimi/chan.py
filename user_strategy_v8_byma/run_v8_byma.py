@@ -466,7 +466,7 @@ def _event_type_rank(event_type: str) -> int:
 def build_last_digest_by_symbol(
   last_df: pd.DataFrame,
   reference_dates_df: pd.DataFrame | None = None,
-  fresh_days: int = 2,
+  fresh_days: int = 4,
 ) -> pd.DataFrame:
   cols = [
     "symbol",
@@ -549,14 +549,8 @@ def build_last_digest_by_symbol(
   for symbol, g in x.groupby("symbol", sort=True):
     item = {"symbol": symbol}
 
-    reference_date_dt = ref_map.get(symbol)
-    reference_date = ref_str_map.get(symbol, "")
-
-    if pd.isna(reference_date_dt) or not reference_date:
-      reference_date_dt = pd.Timestamp("today")
-      reference_date = (
-        reference_date_dt.strftime("%Y/%m/%d") if pd.notna(reference_date_dt) else ""
-      )
+    reference_date_dt = pd.Timestamp("today")
+    reference_date = reference_date_dt.strftime("%Y/%m/%d")
 
     item["reference_date"] = reference_date
     item["signal_date"] = reference_date
