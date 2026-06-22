@@ -25,7 +25,7 @@ READABLE_EVENT_TYPES = {
 }
 
 TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h", "30m", "15m"]
-FRESH_DAYS = 2
+FRESH_DAYS = 4
 
 
 def save_df(df: pd.DataFrame, path: Path):
