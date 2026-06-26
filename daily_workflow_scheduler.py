@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -11,8 +13,11 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Literal
 
+import pandas as pd
 import requests
 from zoneinfo import ZoneInfo
+
+from trade_system.notifiers.telegram import telegram_send_message
 
 try:
   from apscheduler.schedulers.blocking import BlockingScheduler
@@ -25,6 +30,47 @@ LevelType = Literal["1D", "1H", "2H", "4H", "30M", "15M"]
 
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = "/tmp/daily_workflow_scheduler.log"
+
+STRATEGY_DIGEST_REGISTRY = {
+  "v5_macdtd": {
+    "results_dir": BASE_DIR / "user_strategy_v5_macdtd" / "results",
+    "digest_file": "market_signal_digest_last_per_symbol_v5_macdtd.csv",
+  },
+  "v6_bspzs": {
+    "results_dir": BASE_DIR / "user_strategy_v6_bspzs" / "results",
+    "digest_file": "market_trading_signal_digest_last_per_symbol_v6_bspzs.csv",
+  },
+  "v7_bi": {
+    "results_dir": BASE_DIR / "user_strategy_v7_bi" / "results",
+    "digest_file": "market_signal_digest_last_per_symbol_v7_bi.csv",
+  },
+  "v8_byma": {
+    "results_dir": BASE_DIR / "user_strategy_v8_byma" / "results",
+    "digest_file": "market_signal_digest_last_per_symbol_v8_byma.csv",
+  },
+}
+
+LEGACY_TELEGRAM_EVENT_WHITELIST = {
+  "LONG_ENTRY_READY",
+  "LONG_WEAKEN_ALERT",
+  "LONG_EXIT_TREND",
+  "LONG_STOP_LOSS",
+}
+
+CURRENT_TELEGRAM_EVENT_WHITELIST = {
+  "BUY_SIGNAL",
+  "SELL_SIGNAL",
+  "STOP_LOSS_TRIGGERED",
+  "POSITION_OPEN",
+  "TRADE_CLOSED",
+}
+
+TELEGRAM_EVENT_WHITELIST = (
+  LEGACY_TELEGRAM_EVENT_WHITELIST | CURRENT_TELEGRAM_EVENT_WHITELIST
+)
+
+SENT_STATE_DIR = BASE_DIR / "_telegram_sent_state"
+SENT_STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_SYMBOLS = [
   "AAPL",
@@ -75,6 +121,308 @@ class WorkflowConfig:
 
   retry_delay_hours: int = 1
   retry_max_attempts: int = 3
+
+
+def normalize_bool(v) -> bool:
+  if isinstance(v, bool):
+    return v
+  if v is None:
+    return False
+  return str(v).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def is_empty_summary_row(row: dict) -> bool:
+  if "aggregated_summary_text" in row:
+    agg = str(row.get("aggregated_summary_text", "") or "").strip()
+    return not bool(agg)
+  has_signal = normalize_bool(row.get("has_signal", False))
+  if has_signal:
+    return False
+  summary_text = str(row.get("summary_text", "") or "").strip()
+  if not summary_text:
+    return True
+  if "无信号" in summary_text:
+    return True
+  summary_json_raw = row.get("summary_json", "")
+  if summary_json_raw is None:
+    return True
+  try:
+    payload = json.loads(summary_json_raw) if str(summary_json_raw).strip() else {}
+  except Exception:
+    payload = {}
+  if not isinstance(payload, dict) or not payload:
+    return True
+  for tf_data in payload.values():
+    if not isinstance(tf_data, dict):
+      continue
+    event_type = str(tf_data.get("event_type", "") or "").strip()
+    is_fresh = normalize_bool(tf_data.get("is_fresh", False))
+    telegram_allowed = normalize_bool(tf_data.get("telegram_allowed", False))
+    if event_type and is_fresh and telegram_allowed:
+      return False
+  return True
+
+
+def load_digest_rows(
+  digest_path: Path,
+  only_has_signal: bool = True,
+  only_whitelist_event_types: bool = True,
+  ignore_event_type_whitelist: bool = False,
+  include_empty_summary: bool = False,
+  limit: int | None = None,
+) -> list[dict]:
+  if not digest_path.exists():
+    raise FileNotFoundError(f"digest file not found: {digest_path}")
+  try:
+    df = pd.read_csv(digest_path)
+  except Exception as e:
+    raise RuntimeError(f"failed to read digest csv: {e}")
+  if df.empty:
+    return []
+  if "summary_text" not in df.columns and "aggregated_summary_text" not in df.columns:
+    raise RuntimeError(
+      "digest csv missing required column: summary_text or aggregated_summary_text"
+    )
+
+  rows = df.to_dict(orient="records")
+  if "aggregated_summary_text" in df.columns and "summary_text" not in df.columns:
+    for r in rows:
+      r["summary_text"] = str(r.get("aggregated_summary_text", "") or "").strip()
+  filtered_rows: list[dict] = []
+  whitelist_enabled = only_whitelist_event_types and not ignore_event_type_whitelist
+
+  for row in rows:
+    if only_has_signal and not normalize_bool(row.get("has_signal", False)):
+      continue
+    if not include_empty_summary and is_empty_summary_row(row):
+      continue
+    if whitelist_enabled and "event_type" in row:
+      event_type = str(row.get("event_type", "") or "").strip()
+      if event_type and event_type not in TELEGRAM_EVENT_WHITELIST:
+        continue
+    summary_text = str(row.get("summary_text", "") or "").strip()
+    if not summary_text:
+      continue
+    filtered_rows.append(row)
+
+  if filtered_rows and "symbol" in filtered_rows[0]:
+    filtered_rows = sorted(filtered_rows, key=lambda x: str(x.get("symbol", "")))
+  if limit is not None and limit > 0:
+    filtered_rows = filtered_rows[:limit]
+  return filtered_rows
+
+
+def get_sent_state_path(strategy_id: str) -> Path:
+  safe_id = str(strategy_id).strip().lower().replace("/", "_")
+  return SENT_STATE_DIR / f"sent_digest_keys_{safe_id}.json"
+
+
+def load_sent_state(strategy_id: str) -> dict:
+  path = get_sent_state_path(strategy_id)
+  if not path.exists():
+    return {"strategy_id": strategy_id, "items": {}}
+  try:
+    return json.loads(path.read_text(encoding="utf-8"))
+  except Exception:
+    return {"strategy_id": strategy_id, "items": {}}
+
+
+def save_sent_state(strategy_id: str, state: dict):
+  path = get_sent_state_path(strategy_id)
+  path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def clear_sent_state(strategy_id: str):
+  path = get_sent_state_path(strategy_id)
+  if path.exists():
+    path.unlink()
+
+
+def fingerprint_text(text: str) -> str:
+  return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def build_row_dedup_key(row: dict) -> str:
+  summary_text = str(row.get("summary_text", "")).strip()
+  symbol = str(row.get("symbol", "")).strip()
+  summary_json = str(row.get("summary_json", "")).strip()
+  event_type = str(row.get("event_type", "")).strip()
+  event_time = str(row.get("event_time", "")).strip()
+  fingerprint = fingerprint_text(
+    summary_text + "\n" + summary_json + "\n" + event_type + "\n" + event_time
+  )
+  return f"{symbol}::{fingerprint}"
+
+
+def resolve_digest_file(strategy_id: str, digest_file: str | None) -> Path:
+  if digest_file and str(digest_file).strip():
+    p = Path(digest_file).expanduser()
+    if not p.is_absolute():
+      p = BASE_DIR / p
+    return p
+  item = STRATEGY_DIGEST_REGISTRY.get(strategy_id)
+  if not item:
+    raise ValueError(f"unknown strategy_id: {strategy_id}")
+  return item["results_dir"] / item["digest_file"]
+
+
+def send_digest_telegram(
+  strategy_id: str,
+  digest_path: Path | None = None,
+  only_has_signal: bool = True,
+  only_whitelist_event_types: bool = True,
+  include_empty_summary: bool = False,
+  deduplicate: bool = True,
+  resend_existing: bool = False,
+  limit: int | None = None,
+  dry_run: bool = False,
+  reset_sent_state_before_send: bool = False,
+) -> dict:
+  if digest_path is None:
+    digest_path = resolve_digest_file(strategy_id, None)
+
+  if reset_sent_state_before_send:
+    clear_sent_state(strategy_id)
+
+  rows = load_digest_rows(
+    digest_path=digest_path,
+    only_has_signal=only_has_signal,
+    only_whitelist_event_types=only_whitelist_event_types,
+    ignore_event_type_whitelist=False,
+    include_empty_summary=include_empty_summary,
+    limit=limit,
+  )
+
+  sent_state = load_sent_state(strategy_id) if deduplicate else {"items": {}}
+  sent_items = sent_state.get("items", {})
+
+  messages: list[str] = []
+  filtered_rows: list[dict] = []
+  new_state_items: dict = {}
+
+  for row in rows:
+    if "aggregated_summary_text" in row:
+      text = str(row.get("aggregated_summary_text", "")).strip()
+      dedup_fingerprint = str(row.get("aggregated_fingerprint", "")).strip()
+      dedup_key = f"{row.get('symbol', '')}::{dedup_fingerprint}"
+    else:
+      text = str(row.get("summary_text", "")).strip()
+      dedup_key = build_row_dedup_key(row)
+
+    if "aggregated_summary_text" not in row and text:
+      text = f"[{strategy_id}]\n{text}"
+
+    if not text:
+      continue
+
+    already_sent = dedup_key in sent_items
+
+    if deduplicate and (not resend_existing) and already_sent:
+      new_state_items[dedup_key] = sent_items[dedup_key]
+      continue
+
+    filtered_rows.append(
+      {
+        "symbol": row.get("symbol", ""),
+        "event_type": row.get("event_type", ""),
+        "event_time": row.get("event_time", ""),
+        "summary_text": text,
+        "dedup_key": dedup_key,
+        "already_sent": already_sent,
+      }
+    )
+    messages.append(text)
+
+    new_state_items[dedup_key] = {
+      "symbol": row.get("symbol", ""),
+      "event_type": row.get("event_type", ""),
+      "event_time": row.get("event_time", ""),
+      "summary_text": text,
+      "first_sent_at": sent_items.get(dedup_key, {}).get("first_sent_at"),
+      "last_sent_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+      "digest_file": str(digest_path),
+    }
+
+  if not messages:
+    return {
+      "ok": True,
+      "dry_run": dry_run,
+      "strategy_id": strategy_id,
+      "digest_file": str(digest_path),
+      "message_count": 0,
+      "messages": [],
+      "rows": [],
+      "deduplicate": deduplicate,
+      "include_empty_summary": include_empty_summary,
+    }
+
+  if dry_run:
+    return {
+      "ok": True,
+      "dry_run": True,
+      "strategy_id": strategy_id,
+      "digest_file": str(digest_path),
+      "message_count": len(messages),
+      "messages": messages,
+      "rows": filtered_rows,
+      "deduplicate": deduplicate,
+      "include_empty_summary": include_empty_summary,
+    }
+
+  sent = []
+  now_utc = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+  for row, msg in zip(filtered_rows, messages):
+    data = telegram_send_message(
+      chat_id=None,
+      text=msg,
+      parse_mode=None,
+      disable_web_page_preview=True,
+    )
+    result = data.get("result", {})
+    sent.append(
+      {
+        "message_id": result.get("message_id"),
+        "text": result.get("text"),
+        "chat": result.get("chat", {}),
+        "date": result.get("date"),
+        "dedup_key": row.get("dedup_key"),
+      }
+    )
+    if deduplicate:
+      key = row.get("dedup_key")
+      prev = sent_items.get(key, {})
+      new_state_items[key] = {
+        "symbol": row.get("symbol", ""),
+        "event_type": row.get("event_type", ""),
+        "event_time": row.get("event_time", ""),
+        "summary_text": row.get("summary_text", ""),
+        "first_sent_at": prev.get("first_sent_at") or now_utc,
+        "last_sent_at": now_utc,
+        "digest_file": str(digest_path),
+      }
+
+  if deduplicate:
+    merged_items = dict(sent_items)
+    merged_items.update(new_state_items)
+    save_sent_state(
+      strategy_id,
+      {
+        "strategy_id": strategy_id,
+        "updated_at": now_utc,
+        "items": merged_items,
+      },
+    )
+
+  return {
+    "ok": True,
+    "dry_run": False,
+    "strategy_id": strategy_id,
+    "digest_file": str(digest_path),
+    "message_count": len(sent),
+    "sent": sent,
+    "deduplicate": deduplicate,
+    "include_empty_summary": include_empty_summary,
+  }
 
 
 logger = logging.getLogger("daily_workflow_scheduler")
@@ -373,26 +721,12 @@ def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
       "results": [],
     }
 
-  notify_url = f"{config.notify_base_url.rstrip('/')}/api/notify/telegram/send-digest"
+  digest_path = Path(config.notify_digest_file) if config.notify_digest_file else None
   results: list[dict] = []
 
   for strategy_id in strategy_ids:
-    payload = {
-      "strategy_id": strategy_id,
-      "digest_file": config.notify_digest_file,
-      "only_has_signal": config.notify_only_has_signal,
-      "only_whitelist_event_types": config.notify_only_whitelist_event_types,
-      "include_empty_summary": config.notify_include_empty_summary,
-      "deduplicate": config.notify_deduplicate,
-      "resend_existing": config.notify_resend_existing,
-      "limit": config.notify_limit,
-      "dry_run": config.notify_dry_run,
-      "aggregate_mode": getattr(config, "notify_aggregate", None),
-    }
-
     logger.info(
-      "[NOTIFY] request url=%s strategy_id=%s dry_run=%s only_has_signal=%s only_whitelist_event_types=%s include_empty_summary=%s deduplicate=%s resend_existing=%s limit=%s digest_file=%s",
-      notify_url,
+      "[NOTIFY] strategy_id=%s dry_run=%s only_has_signal=%s only_whitelist_event_types=%s include_empty_summary=%s deduplicate=%s resend_existing=%s limit=%s digest_file=%s",
       strategy_id,
       config.notify_dry_run,
       config.notify_only_has_signal,
@@ -405,7 +739,17 @@ def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
     )
 
     try:
-      resp = _post_json(notify_url, payload, timeout=config.notify_timeout)
+      data = send_digest_telegram(
+        strategy_id=strategy_id,
+        digest_path=digest_path,
+        only_has_signal=config.notify_only_has_signal,
+        only_whitelist_event_types=config.notify_only_whitelist_event_types,
+        include_empty_summary=config.notify_include_empty_summary,
+        deduplicate=config.notify_deduplicate,
+        resend_existing=config.notify_resend_existing,
+        limit=config.notify_limit,
+        dry_run=config.notify_dry_run,
+      )
     except Exception as e:
       logger.exception("[NOTIFY] exception strategy_id=%s err=%s", strategy_id, e)
       if not config.continue_on_notify_error:
@@ -414,42 +758,14 @@ def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
         {
           "strategy_id": strategy_id,
           "ok": False,
-          "status_code": None,
           "error": str(e),
         }
       )
       continue
 
-    if not resp.ok:
-      logger.error(
-        "[NOTIFY] fail strategy_id=%s status=%s response=%s",
-        strategy_id,
-        resp.status_code,
-        resp.text[:2000],
-      )
-      if not config.continue_on_notify_error:
-        raise RuntimeError(
-          f"notify failed: strategy_id={strategy_id}, status={resp.status_code}, response={resp.text[:2000]}"
-        )
-      results.append(
-        {
-          "strategy_id": strategy_id,
-          "ok": False,
-          "status_code": resp.status_code,
-          "response": resp.text[:2000],
-        }
-      )
-      continue
-
-    try:
-      data = resp.json()
-    except Exception:
-      data = {"raw": resp.text[:2000]}
-
     logger.info(
-      "[NOTIFY] ok strategy_id=%s status=%s message_count=%s",
+      "[NOTIFY] ok strategy_id=%s message_count=%s",
       strategy_id,
-      resp.status_code,
       data.get("message_count"),
     )
     logger.debug(
@@ -461,8 +777,7 @@ def run_notify_step(config: WorkflowConfig, strategy_ids: list[str]) -> dict:
     results.append(
       {
         "strategy_id": strategy_id,
-        "ok": True,
-        "status_code": resp.status_code,
+        "ok": data.get("ok", False),
         "data": data,
       }
     )
