@@ -107,8 +107,6 @@ class WorkflowConfig:
   continue_on_analyze_error: bool = True
 
   notify_enabled: bool = True
-  notify_base_url: str = "http://127.0.0.1:8010"
-  notify_timeout: int = 120
   notify_dry_run: bool = False
   notify_only_has_signal: bool = True
   notify_only_whitelist_event_types: bool = True
@@ -990,8 +988,6 @@ def build_config(args: argparse.Namespace) -> WorkflowConfig:
     pause_seconds=args.pause_seconds,
     continue_on_analyze_error=not args.stop_on_analyze_error,
     notify_enabled=not args.disable_notify,
-    notify_base_url=args.notify_base_url,
-    notify_timeout=args.notify_timeout,
     notify_dry_run=args.notify_dry_run,
     notify_only_has_signal=not args.notify_send_all,
     notify_only_whitelist_event_types=not args.notify_send_non_whitelist,
@@ -1043,17 +1039,6 @@ def main() -> None:
     "--disable-notify",
     action="store_true",
     help="Disable telegram notify step",
-  )
-  parser.add_argument(
-    "--notify-base-url",
-    default="http://127.0.0.1:8010",
-    help="Telegram notify API base URL",
-  )
-  parser.add_argument(
-    "--notify-timeout",
-    type=int,
-    default=120,
-    help="Notify request timeout seconds",
   )
   parser.add_argument(
     "--notify-dry-run",
@@ -1167,7 +1152,7 @@ def main() -> None:
   )
 
   logger.info(
-    "[BOOT] scheduler started base_url=%s time=%02d:%02d timezone=%s symbols=%s levels=%s strategy_id=%s notify_enabled=%s notify_base_url=%s retry_delay_hours=%s retry_max_attempts=%s",
+    "[BOOT] scheduler started base_url=%s time=%02d:%02d timezone=%s symbols=%s levels=%s strategy_id=%s notify_enabled=%s retry_delay_hours=%s retry_max_attempts=%s",
     config.base_url,
     config.cron_hour,
     config.cron_minute,
@@ -1176,7 +1161,6 @@ def main() -> None:
     config.levels,
     config.backtest_strategy_id,
     config.notify_enabled,
-    config.notify_base_url,
     config.retry_delay_hours,
     config.retry_max_attempts,
   )
