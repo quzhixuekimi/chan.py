@@ -51,6 +51,8 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
     if len(schedule) == 0:
       return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
     last_trading_day = schedule[-1]
+    if last_trading_day.date() > ref_date and len(schedule) >= 2:
+      last_trading_day = schedule[-2]
     if hasattr(last_trading_day, 'tzinfo') and last_trading_day.tzinfo is not None:
       last_trading_day = last_trading_day.replace(tzinfo=None)
     return last_trading_day
@@ -508,7 +510,7 @@ def _event_type_rank(event_type: str) -> int:
 def build_last_digest_by_symbol(
   last_df: pd.DataFrame,
   reference_dates_df: pd.DataFrame | None = None,
-  fresh_days: int = 3,
+  fresh_days: int = 2,
 ) -> pd.DataFrame:
   cols = [
     "symbol",

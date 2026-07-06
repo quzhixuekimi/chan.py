@@ -46,7 +46,7 @@ READABLE_EVENT_TYPES = {
 }
 
 TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h", "30m", "15m"]
-FRESH_DAYS = 3
+FRESH_DAYS = 2
 
 
 def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
@@ -59,11 +59,13 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
     nyse = mcal.get_calendar("NYSE")
     start = ref_date - timedelta(days=7)
     end = ref_date + timedelta(days=1)
-    schedule = nyse.valid_days(start_date=start, end_date=end)
+schedule = nyse.valid_days(start_date=start, end_date=end)
     if len(schedule) == 0:
       return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
     last_trading_day = schedule[-1]
-    if hasattr(last_trading_day, "tzinfo") and last_trading_day.tzinfo is not None:
+    if last_trading_day.date() > ref_date and len(schedule) >= 2:
+      last_trading_day = schedule[-2]
+    if hasattr(last_trading_day, 'tzinfo') and last_trading_day.tzinfo is not None:
       last_trading_day = last_trading_day.replace(tzinfo=None)
     return last_trading_day
   except Exception:

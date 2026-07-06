@@ -378,7 +378,7 @@ def build_market_digest(market_events: List[pd.DataFrame]) -> pd.DataFrame:
       "symbol": symbol,
       "reference_date": ref_date,
       "signal_date": ref_date,
-      "fresh_days": 3,
+      "fresh_days": 2,
     }
 
     sym_ev = combined[combined["symbol"] == symbol]
