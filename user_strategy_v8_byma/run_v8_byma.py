@@ -2,11 +2,21 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import logging
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+
+try:
+  import pandas_market_calendars as mcal
+  _HAS_PMC = True
+except Exception:
+  _HAS_PMC = False
+
+logger = logging.getLogger("v8_byma")
+
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import kline_loader
@@ -14,6 +24,25 @@ import kline_loader
 from user_strategy_v8_byma.config import StrategyConfig
 from user_strategy_v8_byma.backtest_engine import BymaBacktester
 from daily_workflow_scheduler import DEFAULT_SYMBOLS
+
+
+def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
+  """获取最近的美股交易日（不含当天）。"""
+  if ref_date is None:
+    ref_date = date.today()
+  if not _HAS_PMC:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+  try:
+    nyse = mcal.get_calendar("NYSE")
+    start = ref_date - timedelta(days=7)
+    end = ref_date + timedelta(days=1)
+    schedule = nyse.valid_days(start_date=start, end_date=end)
+    if len(schedule) == 0:
+      return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+    last_trading_day = schedule[-1]
+    return last_trading_day
+  except Exception:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
 
 READABLE_EVENT_TYPES = {
   "LONG_ENTRY_READY",
@@ -466,7 +495,7 @@ def _event_type_rank(event_type: str) -> int:
 def build_last_digest_by_symbol(
   last_df: pd.DataFrame,
   reference_dates_df: pd.DataFrame | None = None,
-  fresh_days: int = 4,
+  fresh_days: int = 1,
 ) -> pd.DataFrame:
   cols = [
     "symbol",
@@ -546,10 +575,14 @@ def build_last_digest_by_symbol(
         ref_str_map[sym] = rr.get("reference_date", "")
 
   rows = []
+  today_date = date.today()
+  nyse_trading_day = get_nyse_trading_day(today_date)
+  logger.info("fresh_days=%s, nyse_trading_day=%s", fresh_days, nyse_trading_day.strftime("%Y-%m-%d"))
+
   for symbol, g in x.groupby("symbol", sort=True):
     item = {"symbol": symbol}
 
-    reference_date_dt = pd.Timestamp("today")
+    reference_date_dt = nyse_trading_day
     reference_date = reference_date_dt.strftime("%Y/%m/%d")
 
     item["reference_date"] = reference_date
@@ -1132,7 +1165,8 @@ def main():
   print("\n" + "=" * 60)
   print("V8-BYMA 全市场回测完成")
   print(f"结果保存至: {out_dir}")
-  print(f"新鲜度过滤 fresh_days = {conf.fresh_days}")
+  nyse_trading_day = get_nyse_trading_day()
+  logger.info("新鲜度过滤 fresh_days=%s, nyse_trading_day=%s", conf.fresh_days, nyse_trading_day.strftime("%Y-%m-%d"))
   print(f"白名单: {SYMBOL_TIMEFRAME_WHITELIST}")
   print("高周期过滤映射: NONE")
 

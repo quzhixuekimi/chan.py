@@ -1,13 +1,42 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+try:
+  import pandas_market_calendars as mcal
+  _HAS_PMC = True
+except Exception:
+  _HAS_PMC = False
+
+logger = logging.getLogger("v6_bspzs")
+
 from .config import StrategyConfig
 from user_strategy_v6_bspzs.chan_loader import load_chan_data
 from daily_workflow_scheduler import DEFAULT_SYMBOLS
+
+
+def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
+  """获取最近的美股交易日（不含当天）。"""
+  if ref_date is None:
+    ref_date = date.today()
+  if not _HAS_PMC:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+  try:
+    nyse = mcal.get_calendar("NYSE")
+    start = ref_date - timedelta(days=7)
+    end = ref_date + timedelta(days=1)
+    schedule = nyse.valid_days(start_date=start, end_date=end)
+    if len(schedule) == 0:
+      return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+    last_trading_day = schedule[-1]
+    return last_trading_day
+  except Exception:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
 
 
 def save_df(df: pd.DataFrame, path: Path) -> None:
@@ -329,7 +358,7 @@ def event_type_rank(eventtype: str) -> int:
 
 def build_last_digest_by_symbol(
   last_df: pd.DataFrame,
-  freshdays: int = 4,
+  freshdays: int = 1,
   reference_date: Optional[str] = None,
 ) -> pd.DataFrame:
   if last_df is None or last_df.empty:
@@ -386,10 +415,14 @@ def build_last_digest_by_symbol(
   x["eventdatedt"] = pd.to_datetime(x["eventdate"], errors="coerce")
   x["latesteventtimedt"] = pd.to_datetime(x["latesteventtime"], errors="coerce")
 
+  today_date = date.today()
+  nyse_trading_day = get_nyse_trading_day(today_date)
+  logger.info("freshdays=%s, nyse_trading_day=%s", freshdays, nyse_trading_day.strftime("%Y-%m-%d"))
+
   if reference_date is not None and str(reference_date).strip():
     global_reference_dt = pd.to_datetime(reference_date, errors="coerce")
   else:
-    global_reference_dt = x["eventdatedt"].max()
+    global_reference_dt = nyse_trading_day
 
   rows = []
   for symbol, g in x.groupby("symbol", sort=True):
@@ -1299,7 +1332,7 @@ def main() -> None:
 
       symbol_last_digest_df = build_last_digest_by_symbol(
         symbol_last_df,
-        freshdays=4,
+        freshdays=1,
         reference_date=symbol_reference_date,
       )
       symbol_trading_digest_df = filter_trading_digest(symbol_last_digest_df)
@@ -1344,7 +1377,7 @@ def main() -> None:
 
     market_last_digest_df = build_last_digest_by_symbol(
       market_last_df,
-      freshdays=4,
+      freshdays=1,
       reference_date=global_reference_date,
     )
     market_trading_digest_df = filter_trading_digest(market_last_digest_df)

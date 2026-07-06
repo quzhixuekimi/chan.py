@@ -2,11 +2,20 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import logging
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
+
+try:
+  import pandas_market_calendars as mcal
+  _HAS_PMC = True
+except Exception:
+  _HAS_PMC = False
+
+logger = logging.getLogger("v7_bi")
 
 from user_strategy_v7_bi.config import StrategyConfig
 from user_strategy_v7_bi.chan_loader import (
@@ -25,7 +34,26 @@ READABLE_EVENT_TYPES = {
 }
 
 TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h", "30m", "15m"]
-FRESH_DAYS = 4
+FRESH_DAYS = 1
+
+
+def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
+  """获取最近的美股交易日（不含当天）。"""
+  if ref_date is None:
+    ref_date = date.today()
+  if not _HAS_PMC:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+  try:
+    nyse = mcal.get_calendar("NYSE")
+    start = ref_date - timedelta(days=7)
+    end = ref_date + timedelta(days=1)
+    schedule = nyse.valid_days(start_date=start, end_date=end)
+    if len(schedule) == 0:
+      return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+    last_trading_day = schedule[-1]
+    return last_trading_day
+  except Exception:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
 
 
 def save_df(df: pd.DataFrame, path: Path):
@@ -472,8 +500,11 @@ def build_last_digest_by_symbol(
   x["event_date_dt"] = pd.to_datetime(x["event_date"], errors="coerce")
   x["latest_event_time_dt"] = pd.to_datetime(x["latest_event_time"], errors="coerce")
 
+  today_date = date.today()
+  today_dt = get_nyse_trading_day(today_date)
+  logger.info("fresh_days=%s, nyse_trading_day=%s", fresh_days, today_dt.strftime("%Y-%m-%d"))
+
   rows = []
-  today_dt = pd.Timestamp("today")
   for symbol, g in x.groupby("symbol", sort=True):
     item = {"symbol": symbol}
 
@@ -784,7 +815,9 @@ def main():
   print("\n" + "=" * 60)
   print("V7-BI 全市场回测完成")
   print(f"结果保存至: {out_dir}")
-  print(f"新鲜度过滤 fresh_days = {FRESH_DAYS}")
+  today_date = date.today()
+  nyse_trading_day = get_nyse_trading_day(today_date)
+  logger.info("新鲜度过滤 fresh_days=%s, nyse_trading_day=%s", FRESH_DAYS, nyse_trading_day.strftime("%Y-%m-%d"))
 
 
 if __name__ == "__main__":

@@ -2,17 +2,47 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
+
+try:
+  import pandas_market_calendars as mcal
+  _HAS_PMC = True
+except Exception:
+  _HAS_PMC = False
+
+logger = logging.getLogger("v9_mr")
+
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import kline_loader
 
 from user_strategy_v9_mr.config import StrategyConfig
 from user_strategy_v9_mr.backtest_engine import MRBacktester
+
+
+def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
+  """获取最近的美股交易日（不含当天）。"""
+  if ref_date is None:
+    ref_date = date.today()
+  if not _HAS_PMC:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+  try:
+    nyse = mcal.get_calendar("NYSE")
+    start = ref_date - timedelta(days=7)
+    end = ref_date + timedelta(days=1)
+    schedule = nyse.valid_days(start_date=start, end_date=end)
+    if len(schedule) == 0:
+      return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+    last_trading_day = schedule[-1]
+    return last_trading_day
+  except Exception:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
 
 
 READABLE_EVENT_TYPES = {
@@ -410,7 +440,7 @@ def _event_type_rank(event_type: str) -> int:
 
 
 def build_last_digest_by_symbol(
-  last_df: pd.DataFrame, fresh_days: int = 4
+  last_df: pd.DataFrame, fresh_days: int = 1
 ) -> pd.DataFrame:
   if last_df is None or last_df.empty:
     cols = [
@@ -433,10 +463,14 @@ def build_last_digest_by_symbol(
   x["event_date_dt"] = pd.to_datetime(x["event_date"], errors="coerce")
   x["latest_event_time_dt"] = pd.to_datetime(x["latest_event_time"], errors="coerce")
 
+  today_date = date.today()
+  nyse_trading_day = get_nyse_trading_day(today_date)
+  logger.info("fresh_days=%s, nyse_trading_day=%s", fresh_days, nyse_trading_day.strftime("%Y-%m-%d"))
+
   rows = []
   for symbol, g in x.groupby("symbol", sort=True):
     item = {"symbol": symbol}
-    reference_date_dt = g["event_date_dt"].max()
+    reference_date_dt = nyse_trading_day
     reference_date = (
       reference_date_dt.strftime("%Y/%m/%d") if pd.notna(reference_date_dt) else ""
     )
@@ -685,7 +719,8 @@ def main():
   print("\n" + "=" * 60)
   print("V9-MR 全市场回测完成")
   print(f"结果保存至: {out_dir}")
-  print(f"新鲜度过滤 fresh_days = {conf.fresh_days}")
+  nyse_trading_day = get_nyse_trading_day()
+  logger.info("新鲜度过滤 fresh_days=%s, nyse_trading_day=%s", conf.fresh_days, nyse_trading_day.strftime("%Y-%m-%d"))
 
 
 if __name__ == "__main__":

@@ -2,11 +2,40 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+import logging
+from datetime import date, timedelta
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+try:
+  import pandas_market_calendars as mcal
+  _HAS_PMC = True
+except Exception:
+  _HAS_PMC = False
+
+logger = logging.getLogger("v6_bspzs")
+
 TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h"]
+
+
+def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
+  """获取最近的美股交易日（不含当天）。"""
+  if ref_date is None:
+    ref_date = date.today()
+  if not _HAS_PMC:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+  try:
+    nyse = mcal.get_calendar("NYSE")
+    start = ref_date - timedelta(days=7)
+    end = ref_date + timedelta(days=1)
+    schedule = nyse.valid_days(start_date=start, end_date=end)
+    if len(schedule) == 0:
+      return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
+    last_trading_day = schedule[-1]
+    return last_trading_day
+  except Exception:
+    return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
 READABLE_EVENT_TYPES = {
   "ZS_FORMED",
   "BSP1_BUY",
@@ -458,7 +487,7 @@ def event_type_rank(event_type: str) -> int:
 
 
 def build_last_digest_by_symbol(
-  last_df: pd.DataFrame, fresh_days: int = 4
+  last_df: pd.DataFrame, fresh_days: int = 1
 ) -> pd.DataFrame:
   if last_df is None or last_df.empty:
     cols = [
@@ -494,7 +523,9 @@ def build_last_digest_by_symbol(
   x["latest_event_time_dt"] = pd.to_datetime(x["latest_event_time"], errors="coerce")
 
   rows = []
-  today_dt = pd.Timestamp("today")
+  today_date = date.today()
+  today_dt = get_nyse_trading_day(today_date)
+  logger.info("fresh_days=%s, nyse_trading_day=%s", fresh_days, today_dt.strftime("%Y-%m-%d"))
   for symbol, g in x.groupby("symbol", sort=True):
     item = {"symbol": symbol}
     reference_date_dt = today_dt
