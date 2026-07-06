@@ -5,13 +5,28 @@ Usage: python -m user_strategy_v5_macdtd.run_v5_macdtd
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 from typing import List, Dict, Any
 
 import pandas as pd
 
+logger = logging.getLogger("v5_macdtd")
+if not logger.handlers:
+  _root_logger = logging.getLogger()
+  if _root_logger.handlers:
+    for h in _root_logger.handlers:
+      logger.addHandler(h)
+    logger.propagate = True
+  else:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.propagate = True
+
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import kline_loader
 from daily_workflow_scheduler import DEFAULT_SYMBOLS
@@ -363,7 +378,7 @@ def build_market_digest(market_events: List[pd.DataFrame]) -> pd.DataFrame:
       "symbol": symbol,
       "reference_date": ref_date,
       "signal_date": ref_date,
-      "fresh_days": 1,
+      "fresh_days": 3,
     }
 
     sym_ev = combined[combined["symbol"] == symbol]

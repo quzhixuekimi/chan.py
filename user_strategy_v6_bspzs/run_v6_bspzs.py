@@ -9,11 +9,23 @@ import pandas as pd
 
 try:
   import pandas_market_calendars as mcal
+
   _HAS_PMC = True
 except Exception:
   _HAS_PMC = False
 
 logger = logging.getLogger("v6_bspzs")
+if not logger.handlers:
+  _root_logger = logging.getLogger()
+  if _root_logger.handlers:
+    for h in _root_logger.handlers:
+      logger.addHandler(h)
+    logger.propagate = True
+  else:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.propagate = True
 
 from .config import StrategyConfig
 from user_strategy_v6_bspzs.chan_loader import load_chan_data
@@ -21,7 +33,7 @@ from daily_workflow_scheduler import DEFAULT_SYMBOLS
 
 
 def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
-  """获取最近的美股交易日（不含当天）。"""
+  """获取最近的美股交易日（不含当天），返回 tz-naive 的 timestamp。"""
   if ref_date is None:
     ref_date = date.today()
   if not _HAS_PMC:
@@ -34,6 +46,8 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
     if len(schedule) == 0:
       return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
     last_trading_day = schedule[-1]
+    if hasattr(last_trading_day, "tzinfo") and last_trading_day.tzinfo is not None:
+      last_trading_day = last_trading_day.replace(tzinfo=None)
     return last_trading_day
   except Exception:
     return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
@@ -358,7 +372,7 @@ def event_type_rank(eventtype: str) -> int:
 
 def build_last_digest_by_symbol(
   last_df: pd.DataFrame,
-  freshdays: int = 1,
+  freshdays: int = 3,
   reference_date: Optional[str] = None,
 ) -> pd.DataFrame:
   if last_df is None or last_df.empty:
@@ -417,7 +431,11 @@ def build_last_digest_by_symbol(
 
   today_date = date.today()
   nyse_trading_day = get_nyse_trading_day(today_date)
-  logger.info("freshdays=%s, nyse_trading_day=%s", freshdays, nyse_trading_day.strftime("%Y-%m-%d"))
+  logger.info(
+    "freshdays=%s, nyse_trading_day=%s",
+    freshdays,
+    nyse_trading_day.strftime("%Y-%m-%d"),
+  )
 
   if reference_date is not None and str(reference_date).strip():
     global_reference_dt = pd.to_datetime(reference_date, errors="coerce")
@@ -1332,7 +1350,7 @@ def main() -> None:
 
       symbol_last_digest_df = build_last_digest_by_symbol(
         symbol_last_df,
-        freshdays=1,
+        freshdays=3,
         reference_date=symbol_reference_date,
       )
       symbol_trading_digest_df = filter_trading_digest(symbol_last_digest_df)
@@ -1377,7 +1395,7 @@ def main() -> None:
 
     market_last_digest_df = build_last_digest_by_symbol(
       market_last_df,
-      freshdays=1,
+      freshdays=3,
       reference_date=global_reference_date,
     )
     market_trading_digest_df = filter_trading_digest(market_last_digest_df)
@@ -1389,15 +1407,17 @@ def main() -> None:
         return df
       rename_map = {}
       # simple renames
-      rename_map.update({
-        "signaldate": "signal_date",
-        "referencedate": "reference_date",
-        "freshdays": "fresh_days",
-        "summarytext": "summary_text",
-        "hassignal": "has_signal",
-        "hastradingsignal": "has_trading_signal",
-        "eventdate": "event_date",
-      })
+      rename_map.update(
+        {
+          "signaldate": "signal_date",
+          "referencedate": "reference_date",
+          "freshdays": "fresh_days",
+          "summarytext": "summary_text",
+          "hassignal": "has_signal",
+          "hastradingsignal": "has_trading_signal",
+          "eventdate": "event_date",
+        }
+      )
       # timeframe-specific renames: e.g. '1deventtype' -> '1d_event_type'
       tfs = ["1d", "4h", "2h", "1h"]
       for tf in tfs:

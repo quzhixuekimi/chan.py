@@ -16,6 +16,17 @@ except Exception:
   _HAS_PMC = False
 
 logger = logging.getLogger("v8_byma")
+if not logger.handlers:
+  _root_logger = logging.getLogger()
+  if _root_logger.handlers:
+    for h in _root_logger.handlers:
+      logger.addHandler(h)
+    logger.propagate = True
+  else:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.propagate = True
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -27,7 +38,7 @@ from daily_workflow_scheduler import DEFAULT_SYMBOLS
 
 
 def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
-  """获取最近的美股交易日（不含当天）。"""
+  """获取最近的美股交易日（不含当天），返回 tz-naive 的 timestamp。"""
   if ref_date is None:
     ref_date = date.today()
   if not _HAS_PMC:
@@ -40,6 +51,8 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
     if len(schedule) == 0:
       return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
     last_trading_day = schedule[-1]
+    if hasattr(last_trading_day, 'tzinfo') and last_trading_day.tzinfo is not None:
+      last_trading_day = last_trading_day.replace(tzinfo=None)
     return last_trading_day
   except Exception:
     return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
@@ -495,7 +508,7 @@ def _event_type_rank(event_type: str) -> int:
 def build_last_digest_by_symbol(
   last_df: pd.DataFrame,
   reference_dates_df: pd.DataFrame | None = None,
-  fresh_days: int = 1,
+  fresh_days: int = 3,
 ) -> pd.DataFrame:
   cols = [
     "symbol",

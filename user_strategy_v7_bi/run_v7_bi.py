@@ -11,11 +11,23 @@ import pandas as pd
 
 try:
   import pandas_market_calendars as mcal
+
   _HAS_PMC = True
 except Exception:
   _HAS_PMC = False
 
 logger = logging.getLogger("v7_bi")
+if not logger.handlers:
+  _root_logger = logging.getLogger()
+  if _root_logger.handlers:
+    for h in _root_logger.handlers:
+      logger.addHandler(h)
+    logger.propagate = True
+  else:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.propagate = True
 
 from user_strategy_v7_bi.config import StrategyConfig
 from user_strategy_v7_bi.chan_loader import (
@@ -34,11 +46,11 @@ READABLE_EVENT_TYPES = {
 }
 
 TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h", "30m", "15m"]
-FRESH_DAYS = 1
+FRESH_DAYS = 3
 
 
 def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
-  """获取最近的美股交易日（不含当天）。"""
+  """获取最近的美股交易日（不含当天），返回 tz-naive 的 timestamp。"""
   if ref_date is None:
     ref_date = date.today()
   if not _HAS_PMC:
@@ -51,6 +63,8 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
     if len(schedule) == 0:
       return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
     last_trading_day = schedule[-1]
+    if hasattr(last_trading_day, "tzinfo") and last_trading_day.tzinfo is not None:
+      last_trading_day = last_trading_day.replace(tzinfo=None)
     return last_trading_day
   except Exception:
     return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
@@ -502,7 +516,9 @@ def build_last_digest_by_symbol(
 
   today_date = date.today()
   today_dt = get_nyse_trading_day(today_date)
-  logger.info("fresh_days=%s, nyse_trading_day=%s", fresh_days, today_dt.strftime("%Y-%m-%d"))
+  logger.info(
+    "fresh_days=%s, nyse_trading_day=%s", fresh_days, today_dt.strftime("%Y-%m-%d")
+  )
 
   rows = []
   for symbol, g in x.groupby("symbol", sort=True):
@@ -817,7 +833,11 @@ def main():
   print(f"结果保存至: {out_dir}")
   today_date = date.today()
   nyse_trading_day = get_nyse_trading_day(today_date)
-  logger.info("新鲜度过滤 fresh_days=%s, nyse_trading_day=%s", FRESH_DAYS, nyse_trading_day.strftime("%Y-%m-%d"))
+  logger.info(
+    "新鲜度过滤 fresh_days=%s, nyse_trading_day=%s",
+    FRESH_DAYS,
+    nyse_trading_day.strftime("%Y-%m-%d"),
+  )
 
 
 if __name__ == "__main__":
