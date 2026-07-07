@@ -25,6 +25,9 @@ if not logger.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(_handler)
+    _file_handler = logging.FileHandler("/tmp/daily_workflow_scheduler.log", encoding="utf-8")
+    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(_file_handler)
     logger.propagate = True
 
 from .config import StrategyConfig
