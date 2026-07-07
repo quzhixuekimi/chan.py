@@ -59,7 +59,7 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
     nyse = mcal.get_calendar("NYSE")
     start = ref_date - timedelta(days=7)
     end = ref_date + timedelta(days=1)
-schedule = nyse.valid_days(start_date=start, end_date=end)
+    schedule = nyse.valid_days(start_date=start, end_date=end)
     if len(schedule) == 0:
       return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
     last_trading_day = schedule[-1]
