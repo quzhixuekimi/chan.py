@@ -47,7 +47,6 @@ def _get_queue_dir() -> Path:
 BUY_PRIORITY = [
   "user_strategy_v7_bi",
   "user_strategy_v8_byma",
-  "user_strategy_v5_macdtd",
 ]
 
 SELL_PRIORITY = [
