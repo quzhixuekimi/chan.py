@@ -53,7 +53,7 @@ READABLE_EVENT_TYPES = {
 }
 
 TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h", "30m", "15m"]
-FRESH_DAYS = 1
+FRESH_DAYS = 2
 
 
 def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:

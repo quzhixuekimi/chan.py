@@ -291,7 +291,7 @@ def build_symbol_digest(all_events: Dict[str, pd.DataFrame]) -> pd.DataFrame:
       "symbol": symbol,
       "reference_date": ref_date,
       "signal_date": ref_date,
-      # "fresh_days": 1,
+      # "fresh_days": 2,
     }
 
     for tf in TIMEFRAMES:
@@ -385,7 +385,7 @@ def build_market_digest(market_events: List[pd.DataFrame]) -> pd.DataFrame:
       "symbol": symbol,
       "reference_date": ref_date,
       "signal_date": ref_date,
-      "fresh_days": 1,
+      "fresh_days": 2,
     }
 
     sym_ev = combined[combined["symbol"] == symbol]
