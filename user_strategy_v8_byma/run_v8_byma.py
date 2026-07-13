@@ -62,6 +62,26 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
   except Exception:
     return pd.Timestamp.combine(ref_date, pd.Timestamp.min.time())
 
+
+def _count_trading_days(start_date: pd.Timestamp, end_date: pd.Timestamp) -> int:
+  """计算两个日期之间的NYSE交易日天数（不包括start_date当天）。"""
+  if pd.isna(start_date) or pd.isna(end_date):
+    return 0
+  try:
+    nyse = mcal.get_calendar("NYSE")
+    if start_date > end_date:
+      start_date, end_date = end_date, start_date
+    schedule = nyse.valid_days(
+      start_date=start_date.strftime("%Y-%m-%d"),
+      end_date=end_date.strftime("%Y-%m-%d")
+    )
+    if len(schedule) <= 1:
+      return 0
+    return len(schedule) - 1
+  except Exception:
+    return max(0, (end_date - start_date).days)
+
+
 READABLE_EVENT_TYPES = {
   "LONG_ENTRY_READY",
   "LONG_WEAKEN_ALERT",
@@ -649,7 +669,7 @@ def build_last_digest_by_symbol(
       age_days = None
       is_fresh = False
       if pd.notna(reference_date_dt) and pd.notna(event_date_dt):
-        age_days = int((reference_date_dt - event_date_dt).days)
+        age_days = _count_trading_days(event_date_dt, reference_date_dt)
         is_fresh = age_days <= fresh_days
 
       telegram_allowed = raw_event_type in TELEGRAM_DIGEST_EVENT_TYPES
