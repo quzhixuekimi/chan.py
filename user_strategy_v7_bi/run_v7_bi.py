@@ -27,8 +27,12 @@ if not logger.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(_handler)
-    _file_handler = logging.FileHandler("/tmp/daily_workflow_scheduler.log", encoding="utf-8")
-    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _file_handler = logging.FileHandler(
+      "/tmp/daily_workflow_scheduler.log", encoding="utf-8"
+    )
+    _file_handler.setFormatter(
+      logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    )
     logger.addHandler(_file_handler)
     logger.propagate = True
 
@@ -49,7 +53,7 @@ READABLE_EVENT_TYPES = {
 }
 
 TIMEFRAME_ORDER = ["1d", "4h", "2h", "1h", "30m", "15m"]
-FRESH_DAYS = 2
+FRESH_DAYS = 1
 
 
 def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
@@ -68,7 +72,7 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
     last_trading_day = schedule[-1]
     if last_trading_day.date() > ref_date and len(schedule) >= 2:
       last_trading_day = schedule[-2]
-    if hasattr(last_trading_day, 'tzinfo') and last_trading_day.tzinfo is not None:
+    if hasattr(last_trading_day, "tzinfo") and last_trading_day.tzinfo is not None:
       last_trading_day = last_trading_day.replace(tzinfo=None)
     return last_trading_day
   except Exception:
@@ -84,8 +88,7 @@ def _count_trading_days(start_date: pd.Timestamp, end_date: pd.Timestamp) -> int
     if start_date > end_date:
       start_date, end_date = end_date, start_date
     schedule = nyse.valid_days(
-      start_date=start_date.strftime("%Y-%m-%d"),
-      end_date=end_date.strftime("%Y-%m-%d")
+      start_date=start_date.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d")
     )
     if len(schedule) <= 1:
       return 0

@@ -12,6 +12,7 @@ import pandas as pd
 
 try:
   import pandas_market_calendars as mcal
+
   _HAS_PMC = True
 except Exception:
   _HAS_PMC = False
@@ -27,12 +28,17 @@ if not logger.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(_handler)
-    _file_handler = logging.FileHandler("/tmp/daily_workflow_scheduler.log", encoding="utf-8")
-    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _file_handler = logging.FileHandler(
+      "/tmp/daily_workflow_scheduler.log", encoding="utf-8"
+    )
+    _file_handler.setFormatter(
+      logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    )
     logger.addHandler(_file_handler)
     logger.propagate = True
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import kline_loader
 
@@ -56,7 +62,7 @@ def get_nyse_trading_day(ref_date: Optional[date] = None) -> pd.Timestamp:
     last_trading_day = schedule[-1]
     if last_trading_day.date() > ref_date and len(schedule) >= 2:
       last_trading_day = schedule[-2]
-    if hasattr(last_trading_day, 'tzinfo') and last_trading_day.tzinfo is not None:
+    if hasattr(last_trading_day, "tzinfo") and last_trading_day.tzinfo is not None:
       last_trading_day = last_trading_day.replace(tzinfo=None)
     return last_trading_day
   except Exception:
@@ -72,8 +78,7 @@ def _count_trading_days(start_date: pd.Timestamp, end_date: pd.Timestamp) -> int
     if start_date > end_date:
       start_date, end_date = end_date, start_date
     schedule = nyse.valid_days(
-      start_date=start_date.strftime("%Y-%m-%d"),
-      end_date=end_date.strftime("%Y-%m-%d")
+      start_date=start_date.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d")
     )
     if len(schedule) <= 1:
       return 0
@@ -477,7 +482,7 @@ def _event_type_rank(event_type: str) -> int:
 
 
 def build_last_digest_by_symbol(
-  last_df: pd.DataFrame, fresh_days: int = 2
+  last_df: pd.DataFrame, fresh_days: int = 1
 ) -> pd.DataFrame:
   if last_df is None or last_df.empty:
     cols = [
@@ -502,7 +507,11 @@ def build_last_digest_by_symbol(
 
   today_date = date.today()
   nyse_trading_day = get_nyse_trading_day(today_date)
-  logger.info("fresh_days=%s, nyse_trading_day=%s", fresh_days, nyse_trading_day.strftime("%Y-%m-%d"))
+  logger.info(
+    "fresh_days=%s, nyse_trading_day=%s",
+    fresh_days,
+    nyse_trading_day.strftime("%Y-%m-%d"),
+  )
 
   rows = []
   for symbol, g in x.groupby("symbol", sort=True):
@@ -626,7 +635,8 @@ def main():
 
     try:
       df = kline_loader.load_kline_df(
-        symbol, "1d",
+        symbol,
+        "1d",
         start=conf.timeframes[0].start_time,
         end=conf.timeframes[0].end_time,
       )
@@ -757,7 +767,11 @@ def main():
   print("V9-MR 全市场回测完成")
   print(f"结果保存至: {out_dir}")
   nyse_trading_day = get_nyse_trading_day()
-  logger.info("新鲜度过滤 fresh_days=%s, nyse_trading_day=%s", conf.fresh_days, nyse_trading_day.strftime("%Y-%m-%d"))
+  logger.info(
+    "新鲜度过滤 fresh_days=%s, nyse_trading_day=%s",
+    conf.fresh_days,
+    nyse_trading_day.strftime("%Y-%m-%d"),
+  )
 
 
 if __name__ == "__main__":

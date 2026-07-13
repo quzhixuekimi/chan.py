@@ -25,8 +25,12 @@ if not logger.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(_handler)
-    _file_handler = logging.FileHandler("/tmp/daily_workflow_scheduler.log", encoding="utf-8")
-    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _file_handler = logging.FileHandler(
+      "/tmp/daily_workflow_scheduler.log", encoding="utf-8"
+    )
+    _file_handler.setFormatter(
+      logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    )
     logger.addHandler(_file_handler)
     logger.propagate = True
 
@@ -377,7 +381,7 @@ def event_type_rank(eventtype: str) -> int:
 
 def build_last_digest_by_symbol(
   last_df: pd.DataFrame,
-  freshdays: int = 2,
+  freshdays: int = 1,
   reference_date: Optional[str] = None,
 ) -> pd.DataFrame:
   if last_df is None or last_df.empty:
@@ -1355,7 +1359,7 @@ def main() -> None:
 
       symbol_last_digest_df = build_last_digest_by_symbol(
         symbol_last_df,
-        freshdays=2,
+        freshdays=1,
         reference_date=symbol_reference_date,
       )
       symbol_trading_digest_df = filter_trading_digest(symbol_last_digest_df)

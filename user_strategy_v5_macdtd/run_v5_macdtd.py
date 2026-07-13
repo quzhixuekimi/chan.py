@@ -23,8 +23,12 @@ if not logger.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(_handler)
-    _file_handler = logging.FileHandler("/tmp/daily_workflow_scheduler.log", encoding="utf-8")
-    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _file_handler = logging.FileHandler(
+      "/tmp/daily_workflow_scheduler.log", encoding="utf-8"
+    )
+    _file_handler.setFormatter(
+      logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    )
     logger.addHandler(_file_handler)
     logger.propagate = True
 
@@ -287,7 +291,7 @@ def build_symbol_digest(all_events: Dict[str, pd.DataFrame]) -> pd.DataFrame:
       "symbol": symbol,
       "reference_date": ref_date,
       "signal_date": ref_date,
-      # "fresh_days": 2,
+      # "fresh_days": 1,
     }
 
     for tf in TIMEFRAMES:
@@ -381,7 +385,7 @@ def build_market_digest(market_events: List[pd.DataFrame]) -> pd.DataFrame:
       "symbol": symbol,
       "reference_date": ref_date,
       "signal_date": ref_date,
-      "fresh_days": 2,
+      "fresh_days": 1,
     }
 
     sym_ev = combined[combined["symbol"] == symbol]

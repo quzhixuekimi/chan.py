@@ -63,8 +63,7 @@ def _count_trading_days(start_date: pd.Timestamp, end_date: pd.Timestamp) -> int
     if start_date > end_date:
       start_date, end_date = end_date, start_date
     schedule = nyse.valid_days(
-      start_date=start_date.strftime("%Y-%m-%d"),
-      end_date=end_date.strftime("%Y-%m-%d")
+      start_date=start_date.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d")
     )
     if len(schedule) <= 1:
       return 0
@@ -524,7 +523,7 @@ def event_type_rank(event_type: str) -> int:
 
 
 def build_last_digest_by_symbol(
-  last_df: pd.DataFrame, fresh_days: int = 2
+  last_df: pd.DataFrame, fresh_days: int = 1
 ) -> pd.DataFrame:
   if last_df is None or last_df.empty:
     cols = [
