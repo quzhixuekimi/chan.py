@@ -18,6 +18,8 @@ import kline_store
 
 from indicators_api import router as indicators_router
 from backtest_api import router as backtest_router
+from pivot_sr_api import router as pivot_sr_router
+
 
 router = APIRouter()
 
@@ -575,9 +577,17 @@ def analyze_chan(req: ChanAnalyzeRequest):
     results = kline_store.ensure_levels_updated([code], [level])
     for r in results:
       if not r.success:
-        logger.warning("[UPDATE] code=%s level=%s update_failed: %s", r.code, r.level, r.error)
+        logger.warning(
+          "[UPDATE] code=%s level=%s update_failed: %s", r.code, r.level, r.error
+        )
       else:
-        logger.info("[UPDATE] code=%s level=%s ok fetched=%s upserted=%s", r.code, r.level, r.fetched, r.upserted)
+        logger.info(
+          "[UPDATE] code=%s level=%s ok fetched=%s upserted=%s",
+          r.code,
+          r.level,
+          r.fetched,
+          r.upserted,
+        )
 
     # 旧版 csv_path 只用于响应 cache_file 字段和日志；DB 模式下用合成路径占位
     synthetic_path = f"kline://{code}/{level.lower()}"
@@ -610,3 +620,4 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(indicators_router)
 app.include_router(backtest_router)
+app.include_router(pivot_sr_router)
